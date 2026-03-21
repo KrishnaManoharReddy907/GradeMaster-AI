@@ -67,16 +67,29 @@ async def create_user(user_data) -> dict:
         return None
 
     hashed_password = hash_password(user_data.password)
+    role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+
+    # Single admin enforcement
+    if role == "admin":
+        existing_admin = await db.users.find_one({"role": "admin"})
+        if existing_admin:
+            return {"error": "admin_exists"}
+
+    # Set approved based on role
+    if role in ["teacher", "faculty"]:
+        approved = False
+    else:
+        approved = True
 
     user_dict = {
         "name": user_data.name,
         "email": user_data.email,
         "password": hashed_password,
-        "role": user_data.role.value if hasattr(user_data.role, "value") else user_data.role,
+        "role": role,
         "department_id": user_data.department_id,
         "year": user_data.year,
         "section_id": user_data.section_id,
-        "approved": False,
+        "approved": approved,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }

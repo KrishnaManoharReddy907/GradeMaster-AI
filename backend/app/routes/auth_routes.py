@@ -62,6 +62,12 @@ async def signup(user_data: UserCreate):
             detail="Email already registered"
         )
 
+    if isinstance(user, dict) and user.get("error") == "admin_exists":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admin already exists"
+        )
+
     return MessageResponse(message="User registered successfully. Awaiting approval.")
 
 

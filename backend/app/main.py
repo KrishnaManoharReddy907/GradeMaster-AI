@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from app.database import connect_db, close_db
 from app.routes import health
 from app.routes import auth_routes
+from app.routes import admin_routes
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin"])
 
 
 @app.on_event("startup")
