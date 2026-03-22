@@ -35,6 +35,11 @@ async def submit_mcq_route(
     submission = await submit_mcq(current_user, data)
 
     if isinstance(submission, dict) and "error" in submission:
+        if submission.get("code") == "forbidden":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=submission["error"]
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=submission["error"]
@@ -59,6 +64,11 @@ async def submit_coding_route(
     submission = await submit_coding(current_user, data)
 
     if isinstance(submission, dict) and "error" in submission:
+        if submission.get("code") == "forbidden":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=submission["error"]
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=submission["error"]

@@ -5,6 +5,8 @@ from bson import ObjectId
 from app.database import get_database
 from app.services.assessment_service import get_assessment_by_id, make_aware
 
+ALLOWED_CODING_LANGUAGES = ["python", "cpp", "java", "javascript"]
+
 
 async def check_assessment_active(assessment_id: str) -> dict:
     """Check if assessment exists and is currently active."""
@@ -18,10 +20,10 @@ async def check_assessment_active(assessment_id: str) -> dict:
     end_time = make_aware(assessment["end_time"])
 
     if now < start_time:
-        return {"error": "Assessment has not started yet"}
+        return {"error": "Assessment not active", "code": "forbidden"}
 
     if now > end_time:
-        return {"error": "Assessment has ended"}
+        return {"error": "Assessment not active", "code": "forbidden"}
 
     return {"valid": True, "assessment": assessment}
 
@@ -35,11 +37,11 @@ async def check_student_eligible(student: dict, assessment: dict) -> dict:
         return {"error": "Student section not assigned"}
 
     if student_section_id not in assessment.get("section_ids", []):
-        return {"error": "You are not eligible for this assessment"}
+        return {"error": "You are not eligible for this assessment", "code": "forbidden"}
 
     assessment_year = assessment.get("year")
     if assessment_year and student_year != assessment_year:
-        return {"error": "Assessment is not for your year"}
+        return {"error": "Assessment is not for your year", "code": "forbidden"}
 
     return {"valid": True}
 
@@ -65,13 +67,37 @@ async def check_coding_already_submitted(student_id: str, assessment_id: str, qu
     return existing is not None
 
 
-def calculate_mcq_score(answers: List[dict], mcq_questions: List[dict]) -> dict:
+def validate_mcq_answers(answers: List, mcq_questions: List[dict]) -> dict:
+    """Validate MCQ answers against questions."""
+    question_map = {q["question_id"]: q for q in mcq_questions}
+
+    for answer in answers:
+        question_id = answer.question_id
+        selected_option_id = answer.selected_option_id
+
+        if question_id not in question_map:
+            return {"error": f"Invalid question_id: {question_id}"}
+
+        question = question_map[question_id]
+        options = question.get("options", [])
+        valid_option_ids = [opt.get("option_id") for opt in options]
+
+        if selected_option_id not in valid_option_ids:
+            return {"error": f"Invalid option '{selected_option_id}' for question '{question_id}'"}
+
+    return {"valid": True}
+
+
+def calculate_mcq_score(answers: List, mcq_questions: List[dict]) -> dict:
     """Calculate MCQ score based on answers and questions."""
     score = 0
     total_marks = 0
     results = []
 
     question_map = {q["question_id"]: q for q in mcq_questions}
+
+    for question in mcq_questions:
+        total_marks += question.get("marks", 1)
 
     for answer in answers:
         question_id = answer.question_id
@@ -82,7 +108,6 @@ def calculate_mcq_score(answers: List[dict], mcq_questions: List[dict]) -> dict:
             continue
 
         marks = question.get("marks", 1)
-        total_marks += marks
         correct_option_id = question.get("correct_option_id")
 
         is_correct = selected_option_id == correct_option_id
@@ -117,6 +142,10 @@ async def submit_mcq(student: dict, data) -> dict:
 
     assessment = active_check["assessment"]
 
+    assessment_type = assessment.get("assessment_type")
+    if assessment_type not in ["mcq", "mixed"]:
+        return {"error": "This assessment does not accept MCQ submissions"}
+
     eligibility = await check_student_eligible(student, assessment)
     if "error" in eligibility:
         return eligibility
@@ -127,6 +156,10 @@ async def submit_mcq(student: dict, data) -> dict:
     mcq_questions = assessment.get("mcq_questions", [])
     if not mcq_questions:
         return {"error": "This assessment has no MCQ questions"}
+
+    answer_validation = validate_mcq_answers(data.answers, mcq_questions)
+    if "error" in answer_validation:
+        return answer_validation
 
     score_result = calculate_mcq_score(data.answers, mcq_questions)
 
@@ -153,11 +186,18 @@ async def submit_coding(student: dict, data) -> dict:
     db = get_database()
     student_id = str(student["_id"])
 
+    if data.language not in ALLOWED_CODING_LANGUAGES:
+        return {"error": f"Language '{data.language}' is not allowed. Allowed: {ALLOWED_CODING_LANGUAGES}"}
+
     active_check = await check_assessment_active(data.assessment_id)
     if "error" in active_check:
         return active_check
 
     assessment = active_check["assessment"]
+
+    assessment_type = assessment.get("assessment_type")
+    if assessment_type not in ["coding", "mixed"]:
+        return {"error": "This assessment does not accept coding submissions"}
 
     eligibility = await check_student_eligible(student, assessment)
     if "error" in eligibility:
@@ -176,11 +216,11 @@ async def submit_coding(student: dict, data) -> dict:
     if not question:
         return {"error": "Question not found in this assessment"}
 
-    coding_config = assessment.get("coding_config", {})
-    allowed_languages = coding_config.get("allowed_languages", ["python", "java", "cpp", "c"])
+    coding_config = assessment.get("coding_config") or {}
+    config_languages = coding_config.get("allowed_languages")
 
-    if data.language not in allowed_languages:
-        return {"error": f"Language '{data.language}' is not allowed. Allowed: {allowed_languages}"}
+    if config_languages and data.language not in config_languages:
+        return {"error": f"Language '{data.language}' is not allowed for this assessment. Allowed: {config_languages}"}
 
     if await check_coding_already_submitted(student_id, data.assessment_id, data.question_id):
         return {"error": "You have already submitted code for this question"}
