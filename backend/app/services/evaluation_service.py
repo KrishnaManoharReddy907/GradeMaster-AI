@@ -8,6 +8,7 @@ from bson import ObjectId
 from app.services.judge0_service import execute_code
 from app.database import get_database
 from app.services.assessment_service import get_assessment_by_id
+from app.services.agents.agent_pipeline import run_agent_pipeline
 
 
 JUDGE0_API_URL = "https://judge0-ce.judge0.com"
@@ -130,6 +131,19 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
 
     score = round((passed_tests / total_tests) * max_marks, 2) if total_tests > 0 else 0
 
+    # Run agent pipeline for comprehensive analysis
+    agent_results = await run_agent_pipeline(
+        db=db,
+        submission=submission,
+        score=score,
+        passed_tests=passed_tests,
+        total_tests=total_tests,
+        test_results=test_results,
+        assessment_title=assessment.get("title", ""),
+        question_description=question.get("description", "")
+    )
+
+    # Basic feedback (kept for backward compatibility)
     if passed_tests == total_tests:
         feedback = "All test cases passed!"
     elif passed_tests == 0:
@@ -148,7 +162,13 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             "test_results": test_results,
             "feedback": feedback,
             "evaluated_by": evaluator_id,
-            "evaluated_at": datetime.utcnow()
+            "evaluated_at": datetime.utcnow(),
+            # Agent pipeline results
+            "analysis": agent_results["analysis"],
+            "plagiarism_score": agent_results["plagiarism_score"],
+            "bugs": agent_results["bugs"],
+            "suggested_fix": agent_results["suggested_fix"],
+            "ai_feedback": agent_results["ai_feedback"]
         }}
     )
 
@@ -160,7 +180,13 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         "passed_tests": passed_tests,
         "total_tests": total_tests,
         "feedback": feedback,
-        "test_results": test_results
+        "test_results": test_results,
+        # Include agent results in response
+        "analysis": agent_results["analysis"],
+        "plagiarism_score": agent_results["plagiarism_score"],
+        "bugs": agent_results["bugs"],
+        "suggested_fix": agent_results["suggested_fix"],
+        "ai_feedback": agent_results["ai_feedback"]
     }
 
 
@@ -228,5 +254,11 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
         "feedback": submission.get("feedback"),
         "test_results": submission.get("test_results", []),
         "submitted_at": submission.get("submitted_at"),
-        "evaluated_at": submission.get("evaluated_at")
+        "evaluated_at": submission.get("evaluated_at"),
+        # Agent pipeline results
+        "analysis": submission.get("analysis"),
+        "plagiarism_score": submission.get("plagiarism_score"),
+        "bugs": submission.get("bugs"),
+        "suggested_fix": submission.get("suggested_fix"),
+        "ai_feedback": submission.get("ai_feedback")
     }
