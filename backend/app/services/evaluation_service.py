@@ -166,6 +166,8 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             # Agent pipeline results
             "analysis": agent_results["analysis"],
             "plagiarism_score": agent_results["plagiarism_score"],
+            "similar_submission_id": agent_results.get("similar_submission_id"),
+            "code_embedding": agent_results.get("code_embedding"),
             "bugs": agent_results["bugs"],
             "suggested_fix": agent_results["suggested_fix"],
             "ai_feedback": agent_results["ai_feedback"]
@@ -184,6 +186,7 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         # Include agent results in response
         "analysis": agent_results["analysis"],
         "plagiarism_score": agent_results["plagiarism_score"],
+        "similar_submission_id": agent_results.get("similar_submission_id"),
         "bugs": agent_results["bugs"],
         "suggested_fix": agent_results["suggested_fix"],
         "ai_feedback": agent_results["ai_feedback"]
@@ -258,6 +261,7 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
         # Agent pipeline results
         "analysis": submission.get("analysis"),
         "plagiarism_score": submission.get("plagiarism_score"),
+        "similar_submission_id": submission.get("similar_submission_id"),
         "bugs": submission.get("bugs"),
         "suggested_fix": submission.get("suggested_fix"),
         "ai_feedback": submission.get("ai_feedback")

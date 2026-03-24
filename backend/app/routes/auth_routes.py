@@ -68,7 +68,11 @@ async def signup(user_data: UserCreate):
             detail=user["error"]
         )
 
-    return MessageResponse(message="User registered successfully. Awaiting approval.")
+    # Return appropriate message based on approval status
+    if user.get("is_approved", False):
+        return MessageResponse(message="User registered successfully.")
+    else:
+        return MessageResponse(message="User registered successfully. Awaiting approval.")
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -102,5 +106,5 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         name=current_user["name"],
         email=current_user["email"],
         role=current_user["role"],
-        approved=current_user.get("approved", False)
+        approved=current_user.get("is_approved", False)
     )

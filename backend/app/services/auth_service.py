@@ -155,11 +155,11 @@ async def create_user(user_data) -> dict:
             return section_result
         resolved_section_id = section_result["id"]
 
-    # Set approved based on role
-    if role in ["teacher", "faculty"]:
-        approved = False
+    # Set is_approved based on role
+    if role == "teacher":
+        is_approved = False
     else:
-        approved = True
+        is_approved = True  # admin and student are auto-approved
 
     user_dict = {
         "name": user_data.name,
@@ -169,7 +169,7 @@ async def create_user(user_data) -> dict:
         "department_id": resolved_department_id,
         "year": user_data.year,
         "section_id": resolved_section_id,
-        "approved": approved,
+        "is_approved": is_approved,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
