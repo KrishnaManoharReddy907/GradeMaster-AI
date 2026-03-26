@@ -11,3 +11,5 @@ transformers
 torch
 scikit-learn
 numpy
+tree-sitter
+tree-sitter-python

@@ -9,6 +9,7 @@ from app.services.judge0_service import execute_code
 from app.database import get_database
 from app.services.assessment_service import get_assessment_by_id
 from app.services.agents.agent_pipeline import run_agent_pipeline
+from app.services.agents.ast_analysis_agent import analyze_code_ast
 
 
 JUDGE0_API_URL = "https://judge0-ce.judge0.com"
@@ -131,6 +132,21 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
 
     score = round((passed_tests / total_tests) * max_marks, 2) if total_tests > 0 else 0
 
+    # Run AST analysis on source code (safe - won't crash on errors)
+    try:
+        ast_analysis = analyze_code_ast(source_code)
+    except Exception as e:
+        print(f"[Evaluation] AST analysis failed: {e}")
+        ast_analysis = {
+            "loops": 0,
+            "conditions": 0,
+            "functions": 0,
+            "returns": 0,
+            "nesting_depth": 0,
+            "complexity": "unknown",
+            "details": {"parse_error": True, "error_message": str(e)}
+        }
+
     # Run agent pipeline for comprehensive analysis
     agent_results = await run_agent_pipeline(
         db=db,
@@ -163,6 +179,8 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             "feedback": feedback,
             "evaluated_by": evaluator_id,
             "evaluated_at": datetime.utcnow(),
+            # AST analysis results
+            "ast_analysis": ast_analysis,
             # Agent pipeline results
             "analysis": agent_results["analysis"],
             "plagiarism_score": agent_results["plagiarism_score"],
@@ -183,6 +201,8 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         "total_tests": total_tests,
         "feedback": feedback,
         "test_results": test_results,
+        # AST analysis results
+        "ast_analysis": ast_analysis,
         # Include agent results in response
         "analysis": agent_results["analysis"],
         "plagiarism_score": agent_results["plagiarism_score"],
@@ -258,6 +278,8 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
         "test_results": submission.get("test_results", []),
         "submitted_at": submission.get("submitted_at"),
         "evaluated_at": submission.get("evaluated_at"),
+        # AST analysis results
+        "ast_analysis": submission.get("ast_analysis"),
         # Agent pipeline results
         "analysis": submission.get("analysis"),
         "plagiarism_score": submission.get("plagiarism_score"),
