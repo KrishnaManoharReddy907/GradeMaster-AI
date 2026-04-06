@@ -21,7 +21,8 @@ async def run_agent_pipeline(
     total_tests: int,
     test_results: List[dict],
     assessment_title: str = "",
-    question_description: str = ""
+    question_description: str = "",
+    ast_analysis: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Execute the full evaluation agent pipeline.
@@ -29,7 +30,7 @@ async def run_agent_pipeline(
     Runs all agents in sequence:
     1. Submission Analysis Agent - Analyzes code metadata
     2. Semantic Plagiarism Agent - CodeBERT-based similarity detection
-    3. Bug Agent - Detects bugs from test results
+    3. Bug Agent - Detects bugs from test results and AST analysis
     4. Code Fix Agent - Suggests fixes for detected bugs
     5. Feedback Agent - Generates human-readable feedback (LLM-powered)
 
@@ -42,6 +43,7 @@ async def run_agent_pipeline(
         test_results: List of test execution results
         assessment_title: Title of the assessment
         question_description: Problem statement/description
+        ast_analysis: AST analysis results (loops, nesting, complexity)
 
     Returns:
         Dictionary containing all agent results:

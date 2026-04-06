@@ -10,6 +10,8 @@ from app.database import get_database
 from app.services.assessment_service import get_assessment_by_id
 from app.services.agents.agent_pipeline import run_agent_pipeline
 from app.services.agents.ast_analysis_agent import analyze_code_ast
+from app.services.agents.bug_detection_agent import detect_bugs
+from app.services.agents.llm_code_fix_agent import generate_code_fix
 
 
 JUDGE0_API_URL = "https://judge0-ce.judge0.com"
@@ -68,7 +70,7 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
 
     question = None
     for q in coding_questions:
-        if q["question_id"] == submission["question_id"]:
+        if q.get("question_id") == submission["question_id"]:
             question = q
             break
 
@@ -76,6 +78,24 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         return {"error": "Question not found in assessment"}
 
     test_cases = question.get("test_cases", [])
+
+    # Extract problem description with multiple fallbacks
+    problem_description = (
+        question.get("description") or
+        question.get("question_text") or
+        question.get("title") or
+        question.get("problem_statement") or
+        ""
+    )
+
+    # Final fallback if still empty
+    if not problem_description.strip():
+        problem_description = "Solve the given coding problem based on test cases."
+
+    # DEBUG: Log question keys and description
+    print(f"[Evaluation] Question keys: {list(question.keys())}")
+    print(f"[Evaluation] Problem description extracted: {problem_description[:100]}...")
+
     if not test_cases:
         return {"error": "No test cases found"}
 
@@ -147,6 +167,37 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             "details": {"parse_error": True, "error_message": str(e)}
         }
 
+    # Check if all tests passed - skip bug detection and code fix
+    if passed_tests == total_tests:
+        # All tests passed - no bugs, no fixes needed
+        bugs = []
+        code_fix = {
+            "fix_explanation": "Code is correct. No fixes needed.",
+            "suggested_change": "No changes required.",
+            "corrected_code": None
+        }
+        print(f"[Evaluation] All {total_tests} tests passed - skipping bug detection and code fix agents")
+    else:
+        # Some tests failed - run bug detection and code fix agents
+        bugs = detect_bugs(
+            test_results=test_results,
+            ast_analysis=ast_analysis,
+            stderr=None,
+            compile_output=None
+        )
+
+        # DEBUG: Log problem description before calling code fix
+        print(f"[Evaluation] DEBUG PROBLEM DESCRIPTION: {problem_description}")
+
+        # Run Code Fix Agent
+        code_fix = await generate_code_fix(
+            code=source_code,
+            bugs=bugs,
+            language=language,
+            test_cases=test_results,
+            problem_description=problem_description
+        )
+
     # Run agent pipeline for comprehensive analysis
     agent_results = await run_agent_pipeline(
         db=db,
@@ -156,12 +207,16 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         total_tests=total_tests,
         test_results=test_results,
         assessment_title=assessment.get("title", ""),
-        question_description=question.get("description", "")
+        question_description=problem_description,
+        ast_analysis=ast_analysis
     )
 
     # Basic feedback (kept for backward compatibility)
     if passed_tests == total_tests:
         feedback = "All test cases passed!"
+        # Override ai_feedback for perfect submissions
+        agent_results["ai_feedback"] = "All test cases passed successfully. Excellent work!"
+        agent_results["suggested_fix"] = "No fixes needed. Your solution is correct."
     elif passed_tests == 0:
         feedback = "No test cases passed. Please check your solution."
     else:
@@ -181,12 +236,15 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             "evaluated_at": datetime.utcnow(),
             # AST analysis results
             "ast_analysis": ast_analysis,
+            # Bug Detection Agent results
+            "bugs": bugs,
+            # Code Fix Agent results
+            "code_fix": code_fix,
             # Agent pipeline results
             "analysis": agent_results["analysis"],
             "plagiarism_score": agent_results["plagiarism_score"],
             "similar_submission_id": agent_results.get("similar_submission_id"),
             "code_embedding": agent_results.get("code_embedding"),
-            "bugs": agent_results["bugs"],
             "suggested_fix": agent_results["suggested_fix"],
             "ai_feedback": agent_results["ai_feedback"]
         }}
@@ -203,11 +261,14 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         "test_results": test_results,
         # AST analysis results
         "ast_analysis": ast_analysis,
+        # Bug Detection Agent results
+        "bugs": bugs,
+        # Code Fix Agent results
+        "code_fix": code_fix,
         # Include agent results in response
         "analysis": agent_results["analysis"],
         "plagiarism_score": agent_results["plagiarism_score"],
         "similar_submission_id": agent_results.get("similar_submission_id"),
-        "bugs": agent_results["bugs"],
         "suggested_fix": agent_results["suggested_fix"],
         "ai_feedback": agent_results["ai_feedback"]
     }
@@ -285,6 +346,7 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
         "plagiarism_score": submission.get("plagiarism_score"),
         "similar_submission_id": submission.get("similar_submission_id"),
         "bugs": submission.get("bugs"),
+        "code_fix": submission.get("code_fix"),
         "suggested_fix": submission.get("suggested_fix"),
         "ai_feedback": submission.get("ai_feedback")
     }
