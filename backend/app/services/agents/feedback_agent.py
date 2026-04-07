@@ -96,39 +96,35 @@ async def generate_ai_feedback_llm(
     formatted_tests = format_test_results(test_results)
 
     # Build comprehensive prompt
-    prompt = f"""You are an expert programming instructor analyzing a student's code submission. Provide specific, actionable feedback.
+    prompt = f"""You are a coding instructor giving brief feedback on a student's submission.
 
-## Assessment: {assessment_title}
+## Problem: {assessment_title}
+{question_description[:500] if question_description else "Not provided"}
 
-## Problem Statement:
-{question_description[:1500] if question_description else "Not provided"}
-
-## Student's Code:
+## Code:
 ```
-{code[:3000]}
+{code[:1500]}
 ```
 
-## Test Execution Results:
-{formatted_tests}
+## Results: {passed_tests}/{total_tests} passed | Issues: {', '.join(bugs) if bugs else 'None'}
 
-## Summary:
-- Score: {score} marks
-- Test Cases: {passed_tests}/{total_tests} passed ({percentage:.1f}%)
-- Detected Issues: {', '.join(bugs) if bugs else 'None'}
-- Similarity Score: {plagiarism_score}/100
+## Failed Test (if any):
+{formatted_tests[:500]}
 
-## Instructions:
-Analyze the submission and provide feedback as a structured paragraph covering:
+---
 
-1. **Exact Mistake Analysis**: Look at the FAILED test cases above. Compare the expected output with the actual output. Explain precisely what the code is doing wrong. Reference specific line logic if possible.
+Write SHORT feedback (5-6 lines max) with:
 
-2. **Root Cause**: Identify WHY the code produces incorrect output. Is it a logic error, edge case handling, off-by-one error, incorrect condition, wrong data structure usage, etc.?
+1. **Mistake**: What went wrong (1-2 lines)
+2. **Fix**: How to fix it (1-2 lines)  
+3. **Encouragement**: Brief motivating statement (1 line)
 
-3. **Corrected Approach**: Suggest the specific fix or corrected logic. Do not write full code, but explain what changes are needed (e.g., "change the loop condition from < to <=", "handle the empty input case", "use a different comparison").
-
-4. **Motivation**: End with a brief encouraging statement appropriate for the score achieved.
-
-Write your response as connected paragraphs (not bullet points or templates). Be specific to THIS code and THESE test results. Do not give generic advice."""
+Rules:
+- Be SPECIFIC to this code
+- NO repetition
+- NO generic advice
+- NO bullet points
+- Write as a short paragraph"""
 
     try:
         # Configure ollama client
@@ -140,7 +136,7 @@ Write your response as connected paragraphs (not bullet points or templates). Be
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a precise programming instructor. Analyze code against test results and provide specific, actionable feedback. Always reference the actual vs expected output differences."
+                    "content": "You are a concise coding instructor. Give brief, specific feedback: mistake, fix, encouragement. Max 5-6 lines. No repetition."
                 },
                 {
                     "role": "user",
@@ -148,8 +144,8 @@ Write your response as connected paragraphs (not bullet points or templates). Be
                 }
             ],
             options={
-                "temperature": 0.5,
-                "num_predict": 700
+                "temperature": 0.4,
+                "num_predict": 300
             }
         )
 

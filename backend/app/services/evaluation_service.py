@@ -169,13 +169,12 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
 
     # Check if all tests passed - skip bug detection and code fix
     if passed_tests == total_tests:
-        # All tests passed - no bugs, no fixes needed
+        # All tests passed - clean output, no bugs, no fixes
         bugs = []
-        code_fix = {
-            "fix_explanation": "Code is correct. No fixes needed.",
-            "suggested_change": "No changes required.",
-            "corrected_code": None
-        }
+        code_fix = {}
+        suggested_fix = {}
+        ai_feedback = "All test cases passed successfully. Excellent work!"
+        feedback = "All test cases passed!"
         print(f"[Evaluation] All {total_tests} tests passed - skipping bug detection and code fix agents")
     else:
         # Some tests failed - run bug detection and code fix agents
@@ -197,8 +196,18 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
             test_cases=test_results,
             problem_description=problem_description
         )
+        
+        # Set feedback based on results
+        if passed_tests == 0:
+            feedback = "No test cases passed. Please check your solution."
+        else:
+            feedback = f"Partially correct. {passed_tests}/{total_tests} test cases passed."
+        
+        # These will be set by agent_results below
+        suggested_fix = None
+        ai_feedback = None
 
-    # Run agent pipeline for comprehensive analysis
+    # Run agent pipeline for comprehensive analysis (always runs for AST + analysis)
     agent_results = await run_agent_pipeline(
         db=db,
         submission=submission,
@@ -211,66 +220,74 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         ast_analysis=ast_analysis
     )
 
-    # Basic feedback (kept for backward compatibility)
+    # Use agent results only if not all tests passed
+    if passed_tests < total_tests:
+        suggested_fix = agent_results.get("suggested_fix", {})
+        ai_feedback = agent_results.get("ai_feedback", "Review your solution.")
+
+    # Determine result status and confidence score
     if passed_tests == total_tests:
-        feedback = "All test cases passed!"
-        # Override ai_feedback for perfect submissions
-        agent_results["ai_feedback"] = "All test cases passed successfully. Excellent work!"
-        agent_results["suggested_fix"] = "No fixes needed. Your solution is correct."
-    elif passed_tests == 0:
-        feedback = "No test cases passed. Please check your solution."
+        result_status = "correct"
+        confidence_score = 95
+    elif passed_tests > 0:
+        result_status = "partial"
+        confidence_score = 70
     else:
-        feedback = f"Partially correct. {passed_tests}/{total_tests} test cases passed."
+        result_status = "wrong"
+        confidence_score = 40
+
+    # Build structured response
+    result_summary = {
+        "score": score,
+        "max_marks": max_marks,
+        "passed": passed_tests,
+        "total": total_tests,
+        "status": result_status,
+        "confidence_score": confidence_score,
+        "feedback": feedback
+    }
+
+    analysis = {
+        "ast": ast_analysis,
+        "code_quality": agent_results.get("analysis", {}),
+        "plagiarism": {
+            "score": agent_results.get("plagiarism_score", 0),
+            "similar_submission_id": agent_results.get("similar_submission_id")
+        }
+    }
+
+    issues = {
+        "bugs": bugs,
+        "test_results": test_results
+    }
+
+    ai_insights = {
+        "feedback": ai_feedback,
+        "suggested_fix": suggested_fix,
+        "code_fix": code_fix
+    }
 
     await db.coding_submissions.update_one(
         {"_id": ObjectId(submission_id)},
         {"$set": {
             "status": "evaluated",
-            "score": score,
-            "max_marks": max_marks,
-            "passed_tests": passed_tests,
-            "total_tests": total_tests,
-            "test_results": test_results,
-            "feedback": feedback,
             "evaluated_by": evaluator_id,
             "evaluated_at": datetime.utcnow(),
-            # AST analysis results
-            "ast_analysis": ast_analysis,
-            # Bug Detection Agent results
-            "bugs": bugs,
-            # Code Fix Agent results
-            "code_fix": code_fix,
-            # Agent pipeline results
-            "analysis": agent_results["analysis"],
-            "plagiarism_score": agent_results["plagiarism_score"],
-            "similar_submission_id": agent_results.get("similar_submission_id"),
             "code_embedding": agent_results.get("code_embedding"),
-            "suggested_fix": agent_results["suggested_fix"],
-            "ai_feedback": agent_results["ai_feedback"]
+            # Structured output
+            "result_summary": result_summary,
+            "analysis": analysis,
+            "issues": issues,
+            "ai_insights": ai_insights
         }}
     )
 
     return {
         "submission_id": submission_id,
-        "status": "evaluated",
-        "score": score,
-        "max_marks": max_marks,
-        "passed_tests": passed_tests,
-        "total_tests": total_tests,
-        "feedback": feedback,
-        "test_results": test_results,
-        # AST analysis results
-        "ast_analysis": ast_analysis,
-        # Bug Detection Agent results
-        "bugs": bugs,
-        # Code Fix Agent results
-        "code_fix": code_fix,
-        # Include agent results in response
-        "analysis": agent_results["analysis"],
-        "plagiarism_score": agent_results["plagiarism_score"],
-        "similar_submission_id": agent_results.get("similar_submission_id"),
-        "suggested_fix": agent_results["suggested_fix"],
-        "ai_feedback": agent_results["ai_feedback"]
+        "result_summary": result_summary,
+        "analysis": analysis,
+        "issues": issues,
+        "ai_insights": ai_insights
     }
 
 
