@@ -18,13 +18,18 @@ from app.services.assessment_service import (
 router = APIRouter()
 
 
+# Allowed roles for evaluator access
+EVALUATOR_ROLES = ["admin", "teacher", "faculty"]
+
+
 async def teacher_required(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("role") not in ["teacher", "faculty"]:
+    if current_user.get("role") not in EVALUATOR_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Teacher/Faculty access required"
+            detail="Teacher, faculty, or admin access required"
         )
-    if not current_user.get("approved"):
+    # Skip approval check for admin
+    if current_user.get("role") != "admin" and not current_user.get("approved"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account not approved"

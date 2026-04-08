@@ -238,7 +238,7 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
 
     # Build structured response
     result_summary = {
-        "score": score,
+        "ai_score": score,
         "max_marks": max_marks,
         "passed": passed_tests,
         "total": total_tests,
@@ -271,6 +271,10 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         {"_id": ObjectId(submission_id)},
         {"$set": {
             "status": "evaluated",
+            "ai_score": score,
+            "max_marks": max_marks,
+            "passed_tests": passed_tests,
+            "total_tests": total_tests,
             "evaluated_by": evaluator_id,
             "evaluated_at": datetime.utcnow(),
             "code_embedding": agent_results.get("code_embedding"),
@@ -341,29 +345,74 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
     if not submission:
         return None
 
+    # Get raw data with fallbacks
+    result_summary = submission.get("result_summary", {})
+    ai_insights = submission.get("ai_insights", {})
+
+    # Build unified evaluation block
+    evaluation = {
+        "ai_score": submission.get("ai_score") or result_summary.get("ai_score"),
+        "final_score": submission.get("final_score"),
+        "max_marks": submission.get("max_marks") or result_summary.get("max_marks"),
+        "passed_tests": submission.get("passed_tests") or result_summary.get("passed"),
+        "total_tests": submission.get("total_tests") or result_summary.get("total"),
+        "confidence_score": result_summary.get("confidence_score", 0),
+        "status": submission.get("status", "pending"),
+        "result_status": result_summary.get("status", "unknown")
+    }
+
+    # Build unified feedback block
+    feedback = {
+        "ai_feedback": ai_insights.get("feedback") or submission.get("ai_feedback") or result_summary.get("feedback") or "",
+        "teacher_feedback": submission.get("teacher_feedback") or ""
+    }
+
+    # Build unified corrections block
+    corrections = {
+        "code_fix": ai_insights.get("code_fix") or submission.get("code_fix") or {},
+        "suggested_fix": ai_insights.get("suggested_fix") or submission.get("suggested_fix") or {}
+    }
+
+    # Build analysis block with fallbacks
+    analysis = submission.get("analysis") or {
+        "ast": submission.get("ast_analysis"),
+        "code_quality": {},
+        "plagiarism": {
+            "score": submission.get("plagiarism_score", 0),
+            "similar_submission_id": submission.get("similar_submission_id")
+        }
+    }
+
+    # Build issues block with fallbacks
+    issues = submission.get("issues") or {
+        "bugs": submission.get("bugs", []),
+        "test_results": submission.get("test_results", [])
+    }
+
+    # Build review info block
+    review = {
+        "reviewed_by": submission.get("reviewed_by"),
+        "reviewed_at": submission.get("reviewed_at"),
+        "finalized_by": submission.get("finalized_by"),
+        "finalized_at": submission.get("finalized_at"),
+        "review_history": submission.get("review_history", [])
+    }
+
     return {
         "submission_id": str(submission["_id"]),
-        "assessment_id": submission["assessment_id"],
-        "question_id": submission["question_id"],
-        "student_id": submission["student_id"],
-        "language": submission["language"],
-        "status": submission.get("status", "pending"),
-        "score": submission.get("score"),
-        "max_marks": submission.get("max_marks"),
-        "passed_tests": submission.get("passed_tests"),
-        "total_tests": submission.get("total_tests"),
-        "feedback": submission.get("feedback"),
-        "test_results": submission.get("test_results", []),
+        "assessment_id": submission.get("assessment_id"),
+        "question_id": submission.get("question_id"),
+        "student_id": submission.get("student_id"),
+        "code": submission.get("code"),
+        "language": submission.get("language"),
+        # Unified structured response
+        "evaluation": evaluation,
+        "feedback": feedback,
+        "corrections": corrections,
+        "analysis": analysis,
+        "issues": issues,
+        "review": review,
+        # Timestamps
         "submitted_at": submission.get("submitted_at"),
-        "evaluated_at": submission.get("evaluated_at"),
-        # AST analysis results
-        "ast_analysis": submission.get("ast_analysis"),
-        # Agent pipeline results
-        "analysis": submission.get("analysis"),
-        "plagiarism_score": submission.get("plagiarism_score"),
-        "similar_submission_id": submission.get("similar_submission_id"),
-        "bugs": submission.get("bugs"),
-        "code_fix": submission.get("code_fix"),
-        "suggested_fix": submission.get("suggested_fix"),
-        "ai_feedback": submission.get("ai_feedback")
+        "evaluated_at": submission.get("evaluated_at")
     }
