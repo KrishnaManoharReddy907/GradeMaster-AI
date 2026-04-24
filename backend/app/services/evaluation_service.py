@@ -225,16 +225,37 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         suggested_fix = agent_results.get("suggested_fix", {})
         ai_feedback = agent_results.get("ai_feedback", "Review your solution.")
 
-    # Determine result status and confidence score
+    # Determine result status and calculate accuracy score
+    test_pass_ratio = (passed_tests / total_tests) if total_tests > 0 else 0
+    
     if passed_tests == total_tests:
         result_status = "correct"
-        confidence_score = 95
     elif passed_tests > 0:
         result_status = "partial"
-        confidence_score = 70
     else:
         result_status = "wrong"
-        confidence_score = 40
+    
+    # Calculate accuracy score (0-100) based on multiple factors:
+    # 1. Test pass ratio (70% weight) — primary factor
+    # 2. Code quality from AST (20% weight) — structure & readability
+    # 3. Execution success (10% weight) — no runtime errors
+    test_score = test_pass_ratio * 70
+    
+    # Code quality score from AST analysis
+    quality_score = 0
+    if ast_analysis:
+        has_functions = ast_analysis.get("functions", 0) > 0
+        low_nesting = ast_analysis.get("nesting_depth", 10) <= 3
+        has_returns = ast_analysis.get("returns", 0) > 0
+        quality_score += 7 if has_functions else 0
+        quality_score += 7 if low_nesting else 3
+        quality_score += 6 if has_returns else 0
+    
+    # Execution quality — did all tests at least run without crashing?
+    runtime_errors = sum(1 for tr in test_results if tr.get("stderr"))
+    exec_score = 10 if runtime_errors == 0 else max(0, 10 - runtime_errors * 2)
+    
+    accuracy_score = round(min(test_score + quality_score + exec_score, 100))
 
     # Build structured response
     result_summary = {
@@ -243,7 +264,7 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
         "passed": passed_tests,
         "total": total_tests,
         "status": result_status,
-        "confidence_score": confidence_score,
+        "accuracy_score": accuracy_score,
         "feedback": feedback
     }
 
@@ -356,7 +377,7 @@ async def get_submission_result(submission_id: str) -> Optional[dict]:
         "max_marks": submission.get("max_marks") or result_summary.get("max_marks"),
         "passed_tests": submission.get("passed_tests") or result_summary.get("passed"),
         "total_tests": submission.get("total_tests") or result_summary.get("total"),
-        "confidence_score": result_summary.get("confidence_score", 0),
+        "accuracy_score": result_summary.get("accuracy_score") or result_summary.get("confidence_score", 0),
         "status": submission.get("status", "pending"),
         "result_status": result_summary.get("status", "unknown")
     }

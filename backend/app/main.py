@@ -9,6 +9,7 @@ from app.routes import admin_routes
 from app.routes import assessment_routes
 from app.routes import submission_routes
 from app.routes import teacher_routes
+from app.routes import analytics_routes
 
 load_dotenv()
 
@@ -32,6 +33,7 @@ app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(assessment_routes.router, prefix="/api", tags=["Assessments"])
 app.include_router(submission_routes.router, prefix="/api", tags=["Submissions"])
 app.include_router(teacher_routes.router, tags=["Teacher"])
+app.include_router(analytics_routes.router, prefix="/api", tags=["Analytics & Reports"])
 
 
 @app.on_event("startup")

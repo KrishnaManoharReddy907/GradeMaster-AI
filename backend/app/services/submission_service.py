@@ -264,13 +264,30 @@ async def get_student_submission_status(student_id: str, assessment_id: str) -> 
         "mcq_submitted": mcq_submission is not None,
         "mcq_score": mcq_submission.get("score") if mcq_submission else None,
         "mcq_total": mcq_submission.get("total_marks") if mcq_submission else None,
+        "mcq_percentage": mcq_submission.get("percentage") if mcq_submission else None,
         "coding_submitted": len(coding_submissions) > 0,
         "coding_submissions": [
             {
+                "submission_id": str(s["_id"]),
                 "question_id": s["question_id"],
                 "status": s["status"],
+                "language": s.get("language"),
+                "code": s.get("code"),
                 "score": s.get("score"),
-                "max_marks": s.get("max_marks")
+                "max_marks": s.get("max_marks"),
+                "ai_score": s.get("ai_score"),
+                "final_score": s.get("final_score"),
+                "passed_tests": s.get("passed_tests"),
+                "total_tests": s.get("total_tests"),
+                # AI evaluation data
+                "result_summary": s.get("result_summary", {}),
+                "ai_insights": s.get("ai_insights", {}),
+                "analysis": s.get("analysis", {}),
+                "issues": s.get("issues", {}),
+                # Teacher review data
+                "teacher_feedback": s.get("teacher_feedback"),
+                "reviewed_at": s.get("reviewed_at"),
+                "finalized_at": s.get("finalized_at"),
             }
             for s in coding_submissions
         ]

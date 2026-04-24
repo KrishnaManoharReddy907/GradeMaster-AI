@@ -136,7 +136,7 @@ async def assign_teacher(data) -> dict:
     if teacher.get("role") not in ["teacher", "faculty"]:
         return {"error": "User is not a teacher/faculty"}
 
-    if not teacher.get("approved"):
+    if not (teacher.get("is_approved") or teacher.get("approved")):
         return {"error": "Teacher/faculty is not approved"}
 
     subject = await get_subject_by_id(data.subject_id)
@@ -189,7 +189,7 @@ async def get_all_teacher_assignments() -> List[dict]:
 
 async def get_pending_users() -> List[dict]:
     db = get_database()
-    users = await db.users.find({"approved": False}).to_list(length=500)
+    users = await db.users.find({"is_approved": False}).to_list(length=500)
     return users
 
 
@@ -200,12 +200,12 @@ async def approve_user(user_id: str) -> dict:
         if not user:
             return {"error": "not_found"}
 
-        if user.get("approved") is True:
+        if user.get("is_approved") is True:
             return {"error": "already_approved"}
 
         await db.users.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"approved": True, "updated_at": datetime.utcnow()}}
+            {"$set": {"is_approved": True, "updated_at": datetime.utcnow()}}
         )
 
         return {"success": True}

@@ -26,8 +26,20 @@ from app.services.academic_service import (
     get_pending_users,
     approve_user
 )
+from app.database import get_database
 
 router = APIRouter()
+
+
+@router.get("/check-setup")
+async def check_admin_setup():
+    """Check if an admin account exists. Public endpoint — no auth needed."""
+    db = get_database()
+    admin = await db.users.find_one({"role": "admin"})
+    return {
+        "admin_exists": admin is not None,
+        "setup_required": admin is None
+    }
 
 
 async def admin_required(current_user: dict = Depends(get_current_user)) -> dict:
@@ -36,6 +48,11 @@ async def admin_required(current_user: dict = Depends(get_current_user)) -> dict
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
+    return current_user
+
+
+async def authenticated_required(current_user: dict = Depends(get_current_user)) -> dict:
+    """Any authenticated user (admin, teacher, faculty, student) can access."""
     return current_user
 
 
@@ -60,7 +77,7 @@ async def create_department_route(
 
 
 @router.get("/departments", response_model=List[DepartmentResponse])
-async def get_departments_route(current_user: dict = Depends(admin_required)):
+async def get_departments_route(current_user: dict = Depends(authenticated_required)):
     departments = await get_all_departments()
     return [
         DepartmentResponse(
@@ -101,7 +118,7 @@ async def create_section_route(
 
 
 @router.get("/sections", response_model=List[SectionResponse])
-async def get_sections_route(current_user: dict = Depends(admin_required)):
+async def get_sections_route(current_user: dict = Depends(authenticated_required)):
     sections = await get_all_sections()
     return [
         SectionResponse(
@@ -144,7 +161,7 @@ async def create_subject_route(
 
 
 @router.get("/subjects", response_model=List[SubjectResponse])
-async def get_subjects_route(current_user: dict = Depends(admin_required)):
+async def get_subjects_route(current_user: dict = Depends(authenticated_required)):
     subjects = await get_all_subjects()
     return [
         SubjectResponse(
@@ -207,7 +224,7 @@ async def get_pending_users_route(current_user: dict = Depends(admin_required)):
             department_id=u.get("department_id"),
             year=u.get("year"),
             section_id=u.get("section_id"),
-            approved=u.get("approved", False),
+            approved=u.get("is_approved", False),
             created_at=u.get("created_at")
         )
         for u in users

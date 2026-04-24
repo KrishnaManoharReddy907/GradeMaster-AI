@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List
+from datetime import datetime
 
 from app.routes.auth_routes import get_current_user
 from app.schemas.submission_schema import (
@@ -38,7 +39,7 @@ async def teacher_or_admin_required(current_user: dict = Depends(get_current_use
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Teacher or Admin access required"
         )
-    if current_user.get("role") in ["teacher", "faculty"] and not current_user.get("approved"):
+    if current_user.get("role") in ["teacher", "faculty"] and not (current_user.get("is_approved") or current_user.get("approved")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account not approved"
@@ -185,3 +186,112 @@ async def get_student_submission_detail_route(
         ]
 
     return result
+
+
+@router.get("/teacher/submissions/assessment/{assessment_id}")
+async def get_assessment_submissions_route(
+    assessment_id: str,
+    current_user: dict = Depends(teacher_or_admin_required)
+):
+    """Get all submissions (MCQ + Coding) for a given assessment."""
+    from app.database import get_database
+    from bson import ObjectId
+    db = get_database()
+
+    submissions = []
+
+    # Get MCQ submissions
+    mcq_subs = await db.mcq_submissions.find(
+        {"assessment_id": assessment_id}
+    ).sort("submitted_at", -1).to_list(length=500)
+
+    for sub in mcq_subs:
+        # Try to get student info
+        student = None
+        try:
+            student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
+        except Exception:
+            pass
+
+        submissions.append({
+            "id": str(sub["_id"]),
+            "type": "mcq",
+            "student_id": sub["student_id"],
+            "student_name": student.get("name", "Unknown") if student else "Unknown",
+            "student_email": student.get("email", "") if student else "",
+            "assessment_id": sub["assessment_id"],
+            "status": "evaluated",
+            "score": sub.get("score"),
+            "total_marks": sub.get("total_marks"),
+            "percentage": sub.get("percentage"),
+            "submitted_at": sub.get("submitted_at"),
+        })
+
+    # Get Coding submissions
+    coding_subs = await db.coding_submissions.find(
+        {"assessment_id": assessment_id}
+    ).sort("submitted_at", -1).to_list(length=500)
+
+    for sub in coding_subs:
+        student = None
+        try:
+            student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
+        except Exception:
+            pass
+
+        submissions.append({
+            "id": str(sub["_id"]),
+            "type": "coding",
+            "student_id": sub["student_id"],
+            "student_name": student.get("name", "Unknown") if student else "Unknown",
+            "student_email": student.get("email", "") if student else "",
+            "assessment_id": sub["assessment_id"],
+            "question_id": sub.get("question_id"),
+            "language": sub.get("language"),
+            "status": sub.get("status", "pending"),
+            "ai_score": sub.get("ai_score"),
+            "final_score": sub.get("final_score"),
+            "score": sub.get("score"),
+            "max_marks": sub.get("max_marks"),
+            "submitted_at": sub.get("submitted_at"),
+        })
+
+    return {"submissions": submissions, "total": len(submissions)}
+
+
+@router.get("/teacher/assessment-stats")
+async def get_assessment_stats_route(
+    current_user: dict = Depends(teacher_or_admin_required)
+):
+    """Get submission counts for all of the teacher's assessments."""
+    from app.database import get_database
+    db = get_database()
+
+    teacher_id = str(current_user["_id"])
+
+    # Get all assessments by this teacher
+    assessments = await db.assessments.find(
+        {"teacher_id": teacher_id}
+    ).to_list(length=500)
+
+    stats = {}
+    for assessment in assessments:
+        aid = str(assessment["_id"])
+
+        mcq_count = await db.mcq_submissions.count_documents({"assessment_id": aid})
+        coding_count = await db.coding_submissions.count_documents({"assessment_id": aid})
+
+        pending_count = await db.coding_submissions.count_documents(
+            {"assessment_id": aid, "status": "pending"}
+        )
+        reviewed_count = await db.coding_submissions.count_documents(
+            {"assessment_id": aid, "status": {"$in": ["reviewed", "finalized"]}}
+        )
+
+        stats[aid] = {
+            "submissions_count": mcq_count + coding_count,
+            "pending_count": pending_count,
+            "reviewed_count": reviewed_count + mcq_count,  # MCQ is auto-evaluated
+        }
+
+    return stats
