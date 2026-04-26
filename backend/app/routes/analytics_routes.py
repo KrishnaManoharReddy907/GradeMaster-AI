@@ -137,3 +137,94 @@ async def download_assessment_report(
             "Content-Disposition": f"attachment; filename=assessment_report_{assessment_id[:8]}.pdf"
         }
     )
+
+
+# ─── Per-Assessment Report Endpoint ───────────────────────────
+
+@router.get("/analytics/assessment-report/{assessment_id}")
+async def get_assessment_report(
+    assessment_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get detailed per-assessment report data (only available after deadline).
+    Returns cached report if available, otherwise generates and caches."""
+    from app.services.assessment_report_service import get_or_generate_report
+    from app.database import get_database
+    from bson import ObjectId
+    from datetime import datetime, timezone
+
+    role = current_user.get("role", "")
+    if role not in ("teacher", "faculty", "hod", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can access assessment reports"
+        )
+
+    db = get_database()
+    assessment = await db.assessments.find_one({"_id": ObjectId(assessment_id)})
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+
+    # Check if deadline has passed
+    end_time = assessment.get("end_time")
+    if end_time:
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if now < end_time:
+            raise HTTPException(
+                status_code=400,
+                detail="Report is only available after the assessment deadline"
+            )
+
+    teacher_id = str(current_user["_id"])
+    data = await get_or_generate_report(assessment_id, teacher_id)
+
+    if "error" in data:
+        raise HTTPException(status_code=403, detail=data["error"])
+
+    return data
+
+
+@router.post("/analytics/assessment-report/{assessment_id}/regenerate")
+async def regenerate_assessment_report(
+    assessment_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Force-regenerate assessment report (re-computes stats and AI recommendations)."""
+    from app.services.assessment_report_service import get_or_generate_report
+    from app.database import get_database
+    from bson import ObjectId
+    from datetime import datetime, timezone
+
+    role = current_user.get("role", "")
+    if role not in ("teacher", "faculty", "hod", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can regenerate assessment reports"
+        )
+
+    db = get_database()
+    assessment = await db.assessments.find_one({"_id": ObjectId(assessment_id)})
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+
+    end_time = assessment.get("end_time")
+    if end_time:
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if now < end_time:
+            raise HTTPException(
+                status_code=400,
+                detail="Report is only available after the assessment deadline"
+            )
+
+    teacher_id = str(current_user["_id"])
+    data = await get_or_generate_report(assessment_id, teacher_id, force_regenerate=True)
+
+    if "error" in data:
+        raise HTTPException(status_code=403, detail=data["error"])
+
+    return data
+

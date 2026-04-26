@@ -40,7 +40,7 @@ export default function Landing() {
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <GraduationCap className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold text-text-primary">GradeMaster AI</span>
+            <span className="text-xl font-bold text-text-primary">GradeMaster</span>
           </div>
           <div className="flex items-center gap-4">
             <Link to="/login">
@@ -65,7 +65,7 @@ export default function Landing() {
             <span className="text-primary"> Intelligent Grading</span>
           </h1>
           <p className="text-xl text-text-secondary mb-10 text-pretty leading-relaxed">
-            GradeMaster AI revolutionizes the assessment process with automated grading,
+            GradeMaster revolutionizes the assessment process with automated grading,
             instant feedback, and comprehensive analytics for students and educators.
           </p>
           <div className="flex items-center justify-center gap-4">

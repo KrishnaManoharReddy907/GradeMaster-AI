@@ -10,6 +10,7 @@ from app.routes import assessment_routes
 from app.routes import submission_routes
 from app.routes import teacher_routes
 from app.routes import analytics_routes
+from app.routes import ocr_routes
 
 load_dotenv()
 
@@ -21,7 +22,16 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://192.168.0.106:5173",
+        "http://192.168.0.106:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,6 +44,7 @@ app.include_router(assessment_routes.router, prefix="/api", tags=["Assessments"]
 app.include_router(submission_routes.router, prefix="/api", tags=["Submissions"])
 app.include_router(teacher_routes.router, tags=["Teacher"])
 app.include_router(analytics_routes.router, prefix="/api", tags=["Analytics & Reports"])
+app.include_router(ocr_routes.router, prefix="/api", tags=["OCR - Handwritten"])
 
 
 @app.on_event("startup")

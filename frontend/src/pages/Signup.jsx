@@ -107,7 +107,7 @@ export default function Signup() {
             <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
               <GraduationCap className="w-7 h-7 text-white" />
             </div>
-            <span className="text-2xl font-bold text-text-primary">GradeMaster AI</span>
+            <span className="text-2xl font-bold text-text-primary">GradeMaster</span>
           </Link>
         </div>
 
@@ -116,7 +116,7 @@ export default function Signup() {
             Create account
           </h1>
           <p className="text-text-secondary text-center mb-6">
-            Get started with GradeMaster AI
+            Get started with GradeMaster
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">

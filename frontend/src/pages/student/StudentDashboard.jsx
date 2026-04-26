@@ -22,10 +22,11 @@ export default function StudentDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Fetch ALL assessments (active + past + upcoming)
         const assessments = await studentAPI.getAssessments(token)
-        const assessmentList = Array.isArray(assessments) ? assessments : assessments.assessments || []
-        
-        setRecentAssessments(assessmentList.slice(0, 5))
+        const allAssessments = Array.isArray(assessments) ? assessments : assessments.assessments || []
+
+        setRecentAssessments(allAssessments.slice(0, 5))
         
         // Check submission status for each assessment to determine completed vs pending
         const statusMap = {}
@@ -33,10 +34,10 @@ export default function StudentDashboard() {
         let totalScore = 0
         let scoredCount = 0
         
-        await Promise.all(assessmentList.map(async (assessment) => {
+        await Promise.all(allAssessments.map(async (assessment) => {
           try {
             const statusData = await studentAPI.getSubmissionStatus(token, assessment.id)
-            const hasSubmitted = statusData.mcq_submitted || statusData.coding_submitted
+            const hasSubmitted = statusData.mcq_submitted || statusData.coding_submitted || statusData.manual_submitted
             statusMap[assessment.id] = hasSubmitted
 
             if (hasSubmitted) {
@@ -57,6 +58,11 @@ export default function StudentDashboard() {
                   }
                 }
               }
+              // Count manual scores (finalized only)
+              if (statusData.manual_submitted && statusData.manual_score != null && statusData.manual_total) {
+                totalScore += (statusData.manual_score / statusData.manual_total) * 100
+                scoredCount++
+              }
             }
           } catch {
             statusMap[assessment.id] = false
@@ -65,9 +71,9 @@ export default function StudentDashboard() {
         
         setSubmissionMap(statusMap)
         setStats({
-          totalAssessments: assessmentList.length,
+          totalAssessments: allAssessments.length,
           completed: completedCount,
-          pending: assessmentList.length - completedCount,
+          pending: allAssessments.length - completedCount,
           avgScore: scoredCount > 0 ? Math.round(totalScore / scoredCount) : 0,
         })
       } catch (error) {
@@ -143,6 +149,22 @@ export default function StudentDashboard() {
               {recentAssessments.map((assessment) => {
                 const aType = assessment.assessment_type || assessment.type || 'mcq'
                 const completed = submissionMap[assessment.id] || false
+                const status = assessment.status
+                
+                let badgeText, badgeClass
+                if (completed) {
+                  badgeText = 'Completed'
+                  badgeClass = 'bg-success/10 text-success'
+                } else if (status === 'ended') {
+                  badgeText = 'Missed'
+                  badgeClass = 'bg-error/10 text-error'
+                } else if (status === 'upcoming') {
+                  badgeText = 'Upcoming'
+                  badgeClass = 'bg-primary/10 text-primary'
+                } else {
+                  badgeText = 'Pending'
+                  badgeClass = 'bg-warning/10 text-warning'
+                }
                 return (
                   <Link
                     key={assessment.id}
@@ -153,15 +175,11 @@ export default function StudentDashboard() {
                       <div>
                         <h3 className="font-medium text-text-primary">{assessment.title}</h3>
                         <p className="text-sm text-text-secondary mt-0.5">
-                          {aType === 'mcq' ? 'MCQ Assessment' : aType === 'coding' ? 'Coding Assessment' : 'Mixed Assessment'}
+                          {aType === 'mcq' ? 'MCQ Assessment' : aType === 'coding' ? 'Coding Assessment' : aType === 'manual' ? 'Handwritten Assignment' : 'Mixed Assessment'}
                         </p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        completed
-                          ? 'bg-success/10 text-success'
-                          : 'bg-warning/10 text-warning'
-                      }`}>
-                        {completed ? 'Completed' : 'Pending'}
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${badgeClass}`}>
+                        {badgeText}
                       </span>
                     </div>
                   </Link>

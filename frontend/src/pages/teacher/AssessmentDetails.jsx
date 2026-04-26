@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Code, FileQuestion, Users, Clock, Play } from 'lucide-react'
+import { FileText, Code, FileQuestion, Users, Clock, Play, PenLine, BarChart3 } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { teacherAPI } from '../../lib/api'
 import Card, { CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../../components/Card'
@@ -92,16 +92,18 @@ export default function AssessmentDetails() {
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                      aType === 'mcq' ? 'bg-primary/10' : 'bg-success/10'
+                      aType === 'mcq' ? 'bg-primary/10' : aType === 'manual' ? 'bg-secondary/10' : 'bg-success/10'
                     }`}>
                       {aType === 'mcq' ? (
                         <FileQuestion className="w-5 h-5 text-primary" />
+                      ) : aType === 'manual' ? (
+                        <PenLine className="w-5 h-5 text-secondary" />
                       ) : (
                         <Code className="w-5 h-5 text-success" />
                       )}
                     </div>
                     <Badge variant="default">
-                      {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : 'Mixed'}
+                      {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : aType === 'manual' ? 'Manual' : 'Mixed'}
                     </Badge>
                   </div>
                   <CardTitle className="mt-4">{assessment.title}</CardTitle>
@@ -133,15 +135,39 @@ export default function AssessmentDetails() {
                   >
                     View Submissions
                   </Button>
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={() => handleBatchEvaluate(assessment.id)}
-                    loading={evaluating[assessment.id]}
-                    title="Run AI evaluation on all submissions"
-                  >
-                    <Play className="w-4 h-4" />
-                  </Button>
+                  {(() => {
+                    // Parse end_time as UTC — backend returns ISO without Z suffix
+                    const et = assessment.end_time
+                    if (!et) return null
+                    const endMs = new Date(et.endsWith('Z') ? et : et + 'Z').getTime()
+                    const isPast = endMs < Date.now()
+
+                    return (
+                      <>
+                        {isPast && (
+                          <Button
+                            variant="primary"
+                            className="flex-1"
+                            onClick={() => navigate(`/teacher/assessments/${assessment.id}/report`)}
+                          >
+                            <BarChart3 className="w-4 h-4" />
+                            View Report
+                          </Button>
+                        )}
+                        {aType !== 'manual' && !isPast && (
+                          <Button
+                            variant="primary"
+                            size="md"
+                            onClick={() => handleBatchEvaluate(assessment.id)}
+                            loading={evaluating[assessment.id]}
+                            title="Run AI evaluation on all submissions"
+                          >
+                            <Play className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </>
+                    )
+                  })()}
                 </CardFooter>
               </Card>
             )

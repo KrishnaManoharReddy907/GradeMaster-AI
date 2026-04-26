@@ -2,13 +2,13 @@ import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 const variants = {
-  primary: 'bg-primary hover:bg-primary/90 text-white',
-  secondary: 'bg-card hover:bg-card/80 text-text-primary border border-border',
-  success: 'bg-success hover:bg-success/90 text-white',
-  danger: 'bg-error hover:bg-error/90 text-white',
-  warning: 'bg-warning hover:bg-warning/90 text-white',
-  ghost: 'hover:bg-card text-text-primary',
-  outline: 'border border-border hover:bg-card text-text-primary',
+  primary: 'bg-primary hover:bg-primary-hover text-white shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/30',
+  secondary: 'glass-card hover:bg-white/[0.06] text-text-primary',
+  success: 'bg-success hover:bg-success/90 text-white shadow-sm shadow-success/20',
+  danger: 'bg-error hover:bg-error/90 text-white shadow-sm shadow-error/20',
+  warning: 'bg-warning hover:bg-warning/90 text-white shadow-sm shadow-warning/20',
+  ghost: 'hover:bg-white/[0.04] text-text-primary',
+  outline: 'border border-white/[0.1] hover:bg-white/[0.04] text-text-primary hover:border-white/[0.15]',
 }
 
 const sizes = {
@@ -29,9 +29,11 @@ export default function Button({
   return (
     <button
       className={twMerge(clsx(
-        'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-all duration-200',
-        'focus:outline-none focus:ring-2 focus:ring-primary/50',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center gap-2 font-medium rounded-xl',
+        'transition-all duration-200 ease-out',
+        'focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-1 focus:ring-offset-background',
+        'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none',
+        'active:scale-[0.98]',
         variants[variant],
         sizes[size],
         className

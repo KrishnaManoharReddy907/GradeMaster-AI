@@ -224,20 +224,30 @@ async def get_student_assessment_detail_route(
             "difficulty": q.get("difficulty", "medium"),
         })
 
+    # Strip model answers/keywords from manual questions (student should only see question text + marks)
+    safe_manual_questions = []
+    for q in assessment.get("manual_questions", []):
+        safe_manual_questions.append({
+            "question_id": q.get("question_id", ""),
+            "question_text": q.get("question_text", ""),
+            "marks": q.get("marks", 1),
+        })
+
     return {
         "id": str(assessment["_id"]),
         "title": assessment["title"],
         "description": assessment.get("description"),
         "subject_id": assessment["subject_id"],
         "assessment_type": assessment["assessment_type"],
-        "duration_minutes": assessment["duration_minutes"],
+        "duration_minutes": assessment.get("duration_minutes"),
         "total_marks": assessment["total_marks"],
-        "start_time": assessment["start_time"],
-        "end_time": assessment["end_time"],
+        "start_time": assessment.get("start_time"),
+        "end_time": assessment.get("end_time"),
         "status": assessment.get("status", "active"),
         "instructions": assessment.get("instructions"),
         "mcq_questions": safe_mcq_questions,
         "coding_questions": safe_coding_questions,
+        "manual_questions": safe_manual_questions,
         "coding_config": assessment.get("coding_config"),
         "rules": assessment.get("rules", {}),
     }

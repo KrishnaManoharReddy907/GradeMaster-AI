@@ -110,5 +110,51 @@ class SubmissionStatusResponse(BaseModel):
     assessment_id: str
     mcq_submitted: bool
     coding_submitted: bool
+    manual_submitted: bool = False
     mcq_score: Optional[int] = None
     coding_score: Optional[int] = None
+    manual_score: Optional[float] = None
+
+
+# ── Manual (Handwritten) Submission Schemas ──
+
+class ManualSubmissionCreate(BaseModel):
+    assessment_id: str
+    answers: dict  # {"Q1": "answer text", "Q2": "answer text"}
+
+
+class ManualQuestionResult(BaseModel):
+    question_id: str
+    keyword_score: float
+    ai_score: float
+    final_score: float
+    max_marks: float
+    feedback: str = ""
+    correctness: str = ""
+    completeness: str = ""
+    keywords_matched: List[str] = []
+    keywords_missed: List[str] = []
+
+
+class ManualSubmissionResponse(BaseModel):
+    id: str
+    assessment_id: str
+    student_id: str
+    status: str  # evaluated, reviewed, finalized
+    total_score: float
+    total_marks: float
+    percentage: float
+    results: List[ManualQuestionResult] = []
+    submitted_at: datetime
+    evaluated_at: Optional[datetime] = None
+    
+    # Teacher review fields
+    teacher_adjusted_score: Optional[float] = None
+    teacher_feedback: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+
+
+class ManualTeacherReviewCreate(BaseModel):
+    teacher_adjusted_score: float = Field(..., ge=0)
+    teacher_feedback: Optional[str] = None

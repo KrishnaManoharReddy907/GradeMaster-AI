@@ -8,6 +8,7 @@ class AssessmentType(str, Enum):
     MCQ = "mcq"
     CODING = "coding"
     MIXED = "mixed"
+    MANUAL = "manual"
 
 
 class DifficultyLevel(str, Enum):
@@ -52,6 +53,14 @@ class CodingQuestionSchema(BaseModel):
     memory_limit_mb: int = Field(default=256, ge=64, le=512)
 
 
+class ManualQuestionSchema(BaseModel):
+    question_id: str
+    question_text: str
+    model_answer: str
+    keywords: List[str] = []
+    marks: int = Field(..., ge=1)
+
+
 class CodingConfigSchema(BaseModel):
     allowed_languages: List[str] = ["python", "java", "cpp", "c"]
     enable_auto_grading: bool = True
@@ -75,12 +84,13 @@ class AssessmentCreate(BaseModel):
     subject_id: str
     section_ids: List[str]
     assessment_type: AssessmentType
-    duration_minutes: int = Field(..., ge=5, le=300)
+    duration_minutes: Optional[int] = Field(default=None, ge=1, le=300)
     total_marks: int = Field(..., ge=1)
-    start_time: datetime
+    start_time: Optional[datetime] = None
     end_time: datetime
     mcq_questions: Optional[List[MCQQuestionSchema]] = []
     coding_questions: Optional[List[CodingQuestionSchema]] = []
+    manual_questions: Optional[List[ManualQuestionSchema]] = []
     coding_config: Optional[CodingConfigSchema] = None
     rules: RulesSchema = RulesSchema()
     instructions: Optional[str] = None
@@ -93,9 +103,9 @@ class AssessmentResponse(BaseModel):
     subject_id: str
     section_ids: List[str]
     assessment_type: str
-    duration_minutes: int
+    duration_minutes: Optional[int] = None
     total_marks: int
-    start_time: datetime
+    start_time: Optional[datetime] = None
     end_time: datetime
     teacher_id: str
     status: str
@@ -109,13 +119,14 @@ class AssessmentDetailResponse(BaseModel):
     subject_id: str
     section_ids: List[str]
     assessment_type: str
-    duration_minutes: int
+    duration_minutes: Optional[int] = None
     total_marks: int
-    start_time: datetime
+    start_time: Optional[datetime] = None
     end_time: datetime
     teacher_id: str
     mcq_questions: Optional[List[dict]] = []
     coding_questions: Optional[List[dict]] = []
+    manual_questions: Optional[List[dict]] = []
     coding_config: Optional[dict] = None
     rules: dict
     instructions: Optional[str] = None
@@ -129,9 +140,9 @@ class StudentAssessmentResponse(BaseModel):
     description: Optional[str] = None
     subject_id: str
     assessment_type: str
-    duration_minutes: int
+    duration_minutes: Optional[int] = None
     total_marks: int
-    start_time: datetime
+    start_time: Optional[datetime] = None
     end_time: datetime
     status: str
     instructions: Optional[str] = None

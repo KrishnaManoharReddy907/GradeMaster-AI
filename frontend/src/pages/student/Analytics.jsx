@@ -317,8 +317,8 @@ export default function StudentAnalytics() {
                     <td className="py-3 px-4 text-text-primary font-medium">{sub.assessment_title}</td>
                     <td className="py-3 px-4 text-text-secondary text-sm">{sub.subject || '-'}</td>
                     <td className="py-3 px-4">
-                      <Badge variant={sub.type === 'coding' ? 'primary' : 'default'}>
-                        {sub.type === 'coding' ? 'Coding' : 'MCQ'}
+                      <Badge variant={sub.type === 'coding' ? 'primary' : sub.type === 'manual' ? 'warning' : 'default'}>
+                        {sub.type === 'coding' ? 'Coding' : sub.type === 'manual' ? 'Handwritten' : 'MCQ'}
                       </Badge>
                     </td>
                     <td className="py-3 px-4 text-center text-text-primary">{sub.score}/{sub.max_marks}</td>

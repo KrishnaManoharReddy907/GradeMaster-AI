@@ -33,6 +33,55 @@ LIGHT = colors.HexColor("#64748b")
 ROW_ALT = colors.HexColor("#f8fafc")
 
 
+async def _synthesize_common_issues(feedback_list: list) -> list:
+    """Use Gemini to synthesize student feedback into teacher-facing common issues."""
+    if not feedback_list:
+        return []
+    
+    # Deduplicate
+    unique = list(set(fb.strip() for fb in feedback_list if fb.strip()))
+    if not unique:
+        return []
+    
+    # Format feedback for Gemini
+    feedback_text = "\n".join(f"- {fb}" for fb in unique[:20])
+    
+    try:
+        from google import genai
+        import os
+        
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        
+        prompt = f"""You are helping a teacher understand common issues in their students' assignment submissions.
+
+Below are individual AI feedback comments given to students after evaluating their answers:
+{feedback_text}
+
+Synthesize these into 3-6 bullet points written FOR THE TEACHER (not the student). Each bullet should:
+- Describe a common mistake, gap, or area of weakness observed across students
+- Cover issues from ALL questions in the assignment, not just one
+- Be written in third person ("Students struggled with..." NOT "Your answer...")
+- Be concise (1-2 sentences max per bullet)
+- Focus on what concepts need more teaching attention
+- If most students did well on a topic, mention that too as a strength
+
+Return ONLY the bullet points, one per line, no numbering, no dashes, no bullets — just the text of each point on its own line."""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"max_output_tokens": 2048, "temperature": 0.3}
+        )
+        
+        text = response.text.strip()
+        lines = [line.strip().lstrip("•-*").strip() for line in text.split("\n") if line.strip()]
+        return [line for line in lines if len(line) > 10][:6]
+    except Exception as e:
+        print(f"Gemini synthesis failed: {e}")
+        # Fallback: just deduplicate and truncate
+        return [fb[:250] for fb in unique[:6]]
+
+
 def _styles():
     s = getSampleStyleSheet()
     s.add(ParagraphStyle("Title2", parent=s["Title"], fontSize=20, textColor=PRIMARY, spaceAfter=4))
@@ -107,17 +156,24 @@ async def generate_student_report(student_id: str) -> io.BytesIO:
     name = student.get("name", "Unknown") if student else "Unknown"
     email = student.get("email", "") if student else ""
 
-    # Fetch submissions
+    # Fetch submissions (only finalized for coding/manual)
     coding_subs = await db.coding_submissions.find(
-        {"student_id": student_id}
+        {"student_id": student_id, "status": "finalized"}
     ).sort("submitted_at", -1).to_list(length=200)
 
     mcq_subs = await db.mcq_submissions.find(
         {"student_id": student_id}
     ).sort("submitted_at", -1).to_list(length=200)
 
+    manual_subs = await db.manual_submissions.find(
+        {"student_id": student_id, "status": "finalized"}
+    ).sort("submitted_at", -1).to_list(length=200)
+
     # Fetch assessment + subject info
-    all_aids = set(s.get("assessment_id") for s in coding_subs + mcq_subs if s.get("assessment_id"))
+    all_aids = set(
+        s.get("assessment_id") for s in coding_subs + mcq_subs + manual_subs
+        if s.get("assessment_id")
+    )
     assessment_info = {}
     subject_ids = set()
     for aid in all_aids:
@@ -155,7 +211,7 @@ async def generate_student_report(student_id: str) -> io.BytesIO:
             "subject": subject_map.get(sid, "Unknown"),
             "type": "Coding", "score": score, "max": mx,
             "pct": round(score / mx * 100, 1) if mx > 0 else 0,
-            "status": s.get("status", "-"),
+            "status": "Finalized",
             "feedback": s.get("ai_insights", {}).get("feedback", ""),
             "issues": s.get("issues", {}),
         })
@@ -171,6 +227,31 @@ async def generate_student_report(student_id: str) -> io.BytesIO:
             "type": "MCQ", "score": score, "max": mx,
             "pct": round(score / mx * 100, 1) if mx > 0 else 0,
             "status": "Evaluated", "feedback": "", "issues": {},
+        })
+    for s in manual_subs:
+        manual_eval = s.get("manual_evaluation", {})
+        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        mx = manual_eval.get("total_marks") or 1
+        aid = s.get("assessment_id", "")
+        info = assessment_info.get(aid, {})
+        sid = info.get("subject_id", "")
+        fb = manual_eval.get("overall_feedback", "")
+        if not fb:
+            # Build feedback from per-question AI feedback
+            q_feedbacks = []
+            for qr in manual_eval.get("results", []):
+                qfb = qr.get("feedback", "")
+                if qfb:
+                    q_feedbacks.append(f"{qr.get('question_id', '?')}: {qfb}")
+            fb = " | ".join(q_feedbacks)
+        scored.append({
+            "title": info.get("title", "Unknown"),
+            "subject": subject_map.get(sid, "Unknown"),
+            "type": "Manual", "score": score, "max": mx,
+            "pct": round(score / mx * 100, 1) if mx > 0 else 0,
+            "status": "Finalized",
+            "feedback": fb,
+            "issues": {},
         })
 
     # Build PDF
@@ -306,16 +387,22 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
         except Exception:
             pass
 
-    # Fetch submissions
+    # Fetch submissions (only finalized for coding/manual)
     coding_subs = await db.coding_submissions.find(
-        {"assessment_id": assessment_id}
+        {"assessment_id": assessment_id, "status": "finalized"}
     ).to_list(length=500)
     mcq_subs = await db.mcq_submissions.find(
         {"assessment_id": assessment_id}
     ).to_list(length=500)
+    manual_subs = await db.manual_submissions.find(
+        {"assessment_id": assessment_id, "status": "finalized"}
+    ).to_list(length=500)
 
     # Student names
-    student_ids = set(s.get("student_id") for s in coding_subs + mcq_subs if s.get("student_id"))
+    student_ids = set(
+        s.get("student_id") for s in coding_subs + mcq_subs + manual_subs
+        if s.get("student_id")
+    )
     student_map = {}
     for sid_val in student_ids:
         try:
@@ -338,12 +425,11 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
         all_pcts.append(pct)
         student_scores.setdefault(sid_val, []).append({
             "score": score, "max": mx, "pct": pct,
-            "status": s.get("status", "-"), "type": "Coding"
+            "status": "Finalized", "type": "Coding"
         })
         fb = s.get("ai_insights", {}).get("feedback", "")
         if fb:
             all_feedback.append(fb)
-        # Collect issues for common mistakes
         issues = s.get("issues", {})
         if isinstance(issues, dict):
             bugs = issues.get("bugs", [])
@@ -360,6 +446,23 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
             "score": score, "max": mx, "pct": pct,
             "status": "Evaluated", "type": "MCQ"
         })
+
+    for s in manual_subs:
+        manual_eval = s.get("manual_evaluation", {})
+        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        mx = manual_eval.get("total_marks") or 1
+        pct = round(score / mx * 100, 1) if mx > 0 else 0
+        sid_val = s.get("student_id", "")
+        all_pcts.append(pct)
+        student_scores.setdefault(sid_val, []).append({
+            "score": score, "max": mx, "pct": pct,
+            "status": "Finalized", "type": "Manual"
+        })
+        # Collect AI feedback from manual evaluation
+        for qr in manual_eval.get("results", []):
+            qfb = qr.get("feedback", "")
+            if qfb:
+                all_feedback.append(qfb)
 
     # Build PDF
     buf = io.BytesIO()
@@ -444,24 +547,31 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
         ]))
         story.append(dist_t)
 
-    # Common mistakes analysis
+    # Common Issues & Teaching Insights
+    # Try to pull cached AI recommendation from assessment_reports collection
+    cached_report = await db.assessment_reports.find_one({"assessment_id": assessment_id})
+    teaching_rec = ""
+    if cached_report:
+        report_data = cached_report.get("report_data", {})
+        # Check type-specific insights for teaching recommendation
+        for key in ["manual_insights", "mcq_insights", "coding_insights"]:
+            insights = report_data.get(key, {})
+            if insights.get("teaching_recommendation"):
+                teaching_rec = insights["teaching_recommendation"]
+                break
+
+    if teaching_rec:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("AI Teaching Recommendation", styles["H2"]))
+        story.append(Paragraph(teaching_rec, styles["Body"]))
+
     if all_feedback:
         story.append(Spacer(1, 10))
         story.append(Paragraph("Common Issues & Mistakes", styles["H2"]))
-        story.append(Paragraph(
-            "Based on AI analysis of student submissions, these are the most frequent issues:",
-            styles["Body"]
-        ))
-        # Show unique feedback items (deduplicated, max 8)
-        seen = set()
-        unique_fb = []
-        for fb in all_feedback:
-            fb_clean = fb.strip()[:200]
-            if fb_clean and fb_clean.lower() not in seen:
-                seen.add(fb_clean.lower())
-                unique_fb.append(fb_clean)
-        for fb in unique_fb[:8]:
-            story.append(Paragraph(f"• {fb}", styles["Feedback"]))
+        # Synthesize teacher-facing summary from student feedback
+        summary = await _synthesize_common_issues(all_feedback)
+        for line in summary:
+            story.append(Paragraph(f"• {line}", styles["Feedback"]))
 
     _footer(story, styles)
     doc.build(story)

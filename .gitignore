@@ -12,11 +12,21 @@ frontend/.env
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
 # ======================
-# ENV FILES
+# ENV FILES (CRITICAL)
 # ======================
 .env
+backend/.env
+frontend/.env
+
+# ======================
+# UPLOADS (OCR FILES)
+# ======================
+uploads/
+backend/uploads/
 
 # ======================
 # SYSTEM FILES
@@ -28,3 +38,9 @@ Thumbs.db
 # LOG FILES
 # ======================
 *.log
+
+# ======================
+# IDE FILES
+# ======================
+.vscode/
+.idea/

@@ -11,23 +11,24 @@ export default function Input({
   return (
     <div className={twMerge('flex flex-col gap-1.5', containerClassName)}>
       {label && (
-        <label className="text-sm font-medium text-text-primary">
+        <label className="text-sm font-medium text-text-primary tracking-tight">
           {label}
         </label>
       )}
       <input
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-card border border-border',
-          'text-text-primary placeholder:text-text-secondary',
-          'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary',
+          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'text-text-primary placeholder:text-text-muted text-sm',
+          'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200',
-          error && 'border-error focus:ring-error/50 focus:border-error',
+          'hover:border-white/[0.15]',
+          error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}
         {...props}
       />
       {error && (
-        <span className="text-sm text-error">{error}</span>
+        <span className="text-xs text-error">{error}</span>
       )}
     </div>
   )
@@ -44,17 +45,18 @@ export function Select({
   return (
     <div className={twMerge('flex flex-col gap-1.5', containerClassName)}>
       {label && (
-        <label className="text-sm font-medium text-text-primary">
+        <label className="text-sm font-medium text-text-primary tracking-tight">
           {label}
         </label>
       )}
       <select
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-card border border-border',
-          'text-text-primary',
-          'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary',
+          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'text-text-primary text-sm',
+          'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200',
-          error && 'border-error focus:ring-error/50 focus:border-error',
+          'hover:border-white/[0.15]',
+          error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}
         {...props}
@@ -62,7 +64,7 @@ export function Select({
         {children}
       </select>
       {error && (
-        <span className="text-sm text-error">{error}</span>
+        <span className="text-xs text-error">{error}</span>
       )}
     </div>
   )
@@ -78,23 +80,24 @@ export function Textarea({
   return (
     <div className={twMerge('flex flex-col gap-1.5', containerClassName)}>
       {label && (
-        <label className="text-sm font-medium text-text-primary">
+        <label className="text-sm font-medium text-text-primary tracking-tight">
           {label}
         </label>
       )}
       <textarea
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-card border border-border',
-          'text-text-primary placeholder:text-text-secondary',
-          'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary',
+          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'text-text-primary placeholder:text-text-muted text-sm',
+          'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200 resize-none',
-          error && 'border-error focus:ring-error/50 focus:border-error',
+          'hover:border-white/[0.15]',
+          error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}
         {...props}
       />
       {error && (
-        <span className="text-sm text-error">{error}</span>
+        <span className="text-xs text-error">{error}</span>
       )}
     </div>
   )

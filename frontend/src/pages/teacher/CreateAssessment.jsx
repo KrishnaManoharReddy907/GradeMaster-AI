@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, Trash2, FileQuestion, Code } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, FileQuestion, Code, PenLine } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { teacherAPI, adminAPI } from '../../lib/api'
 import Card from '../../components/Card'
@@ -20,13 +20,22 @@ export default function CreateAssessment() {
     section_ids: [],
     assessment_type: 'mcq',
     duration_minutes: '',
-    total_marks: '',
     start_time: '',
     end_time: '',
     instructions: '',
   })
   const [mcqQuestions, setMcqQuestions] = useState([])
   const [codingQuestions, setCodingQuestions] = useState([])
+  const [manualQuestions, setManualQuestions] = useState([])
+  const [defaultMarks, setDefaultMarks] = useState(1)
+
+  // Live-calculated total marks from all questions
+  const totalMarks = useMemo(() => {
+    const mcqTotal = mcqQuestions.reduce((sum, q) => sum + (q.marks || 0), 0)
+    const codingTotal = codingQuestions.reduce((sum, q) => sum + (q.marks || 0), 0)
+    const manualTotal = manualQuestions.reduce((sum, q) => sum + (q.marks || 0), 0)
+    return mcqTotal + codingTotal + manualTotal
+  }, [mcqQuestions, codingQuestions, manualQuestions])
 
   // Fetch subjects and sections for dropdowns
   useEffect(() => {
@@ -66,7 +75,7 @@ export default function CreateAssessment() {
         { option_id: 'd', text: '' },
       ],
       correct_option_id: 'a',
-      marks: 1,
+      marks: defaultMarks,
       difficulty: 'medium',
     }])
   }
@@ -99,7 +108,7 @@ export default function CreateAssessment() {
       sample_input: '',
       sample_output: '',
       test_cases: [{ input: '', expected_output: '', is_hidden: false }],
-      marks: 10,
+      marks: defaultMarks,
       difficulty: 'medium',
       time_limit_seconds: 2,
       memory_limit_mb: 256,
@@ -134,6 +143,27 @@ export default function CreateAssessment() {
     setCodingQuestions(codingQuestions.filter((_, i) => i !== index))
   }
 
+  // Manual Question helpers
+  const addManualQuestion = () => {
+    setManualQuestions([...manualQuestions, {
+      question_id: `Q${manualQuestions.length + 1}`,
+      question_text: '',
+      model_answer: '',
+      keywords: [],
+      marks: defaultMarks,
+    }])
+  }
+
+  const updateManualQuestion = (index, field, value) => {
+    const updated = [...manualQuestions]
+    updated[index][field] = value
+    setManualQuestions(updated)
+  }
+
+  const removeManualQuestion = (index) => {
+    setManualQuestions(manualQuestions.filter((_, i) => i !== index))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
 
@@ -149,17 +179,40 @@ export default function CreateAssessment() {
       addToast('Please select at least one section', 'warning')
       return
     }
-    if (!form.duration_minutes) {
-      addToast('Please enter duration', 'warning')
+    if (form.assessment_type !== 'manual') {
+      if (!form.duration_minutes) {
+        addToast('Please enter duration', 'warning')
+        return
+      }
+    }
+    if (totalMarks <= 0) {
+      addToast('Total marks must be greater than 0. Add questions with marks.', 'warning')
       return
     }
-    if (!form.total_marks) {
-      addToast('Please enter total marks', 'warning')
-      return
-    }
-    if (!form.start_time || !form.end_time) {
+    if (form.assessment_type !== 'manual' && (!form.start_time || !form.end_time)) {
       addToast('Please set start and end times', 'warning')
       return
+    }
+    if (form.assessment_type === 'manual' && !form.end_time) {
+      addToast('Please set a deadline (end time)', 'warning')
+      return
+    }
+
+    // Validate: duration must not exceed the window (end - start)
+    if (form.assessment_type !== 'manual' && form.start_time && form.end_time && form.duration_minutes) {
+      const startMs = new Date(form.start_time).getTime()
+      const endMs = new Date(form.end_time).getTime()
+      const windowMinutes = Math.round((endMs - startMs) / 60000)
+      const duration = parseInt(form.duration_minutes)
+      
+      if (endMs <= startMs) {
+        addToast('End time must be after start time', 'error')
+        return
+      }
+      if (duration > windowMinutes) {
+        addToast(`Duration (${duration} min) cannot exceed the window between start and end time (${windowMinutes} min). Either increase the window or reduce the duration.`, 'error')
+        return
+      }
     }
 
     if (form.assessment_type === 'mcq' && mcqQuestions.length === 0) {
@@ -172,6 +225,11 @@ export default function CreateAssessment() {
       return
     }
 
+    if (form.assessment_type === 'manual' && manualQuestions.length === 0) {
+      addToast('Please add at least one manual question', 'warning')
+      return
+    }
+
     setLoading(true)
     try {
       const payload = {
@@ -180,13 +238,14 @@ export default function CreateAssessment() {
         subject_id: form.subject_id,
         section_ids: form.section_ids,
         assessment_type: form.assessment_type,
-        duration_minutes: parseInt(form.duration_minutes),
-        total_marks: parseInt(form.total_marks),
-        start_time: new Date(form.start_time).toISOString(),
+        duration_minutes: form.assessment_type === 'manual' ? null : parseInt(form.duration_minutes),
+        total_marks: totalMarks,
+        start_time: form.assessment_type === 'manual' ? null : new Date(form.start_time).toISOString(),
         end_time: new Date(form.end_time).toISOString(),
         instructions: form.instructions || null,
         mcq_questions: form.assessment_type === 'mcq' || form.assessment_type === 'mixed' ? mcqQuestions : [],
         coding_questions: form.assessment_type === 'coding' || form.assessment_type === 'mixed' ? codingQuestions : [],
+        manual_questions: form.assessment_type === 'manual' ? manualQuestions : [],
       }
 
       await teacherAPI.createAssessment(token, payload)
@@ -239,11 +298,13 @@ export default function CreateAssessment() {
                   setForm({ ...form, assessment_type: e.target.value })
                   setMcqQuestions([])
                   setCodingQuestions([])
+                  setManualQuestions([])
                 }}
               >
                 <option value="mcq">MCQ Assessment</option>
                 <option value="coding">Coding Assessment</option>
                 <option value="mixed">Mixed (MCQ + Coding)</option>
+                <option value="manual">Manual (Handwritten)</option>
               </Select>
               <Select
                 label="Subject"
@@ -256,36 +317,101 @@ export default function CreateAssessment() {
                 ))}
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
+              {form.assessment_type !== 'manual' && (
+                <Input
+                  label="Duration (minutes)"
+                  type="number"
+                  placeholder="e.g., 60"
+                  min="0"
+                  value={form.duration_minutes}
+                  onChange={(e) => {
+                    const newDur = e.target.value
+                    const updatedForm = { ...form, duration_minutes: newDur }
+                    // Auto-fill end_time = start + duration
+                    if (form.start_time && newDur) {
+                      const startDate = new Date(form.start_time)
+                      startDate.setMinutes(startDate.getMinutes() + parseInt(newDur))
+                      const pad = (n) => String(n).padStart(2, '0')
+                      updatedForm.end_time = `${startDate.getFullYear()}-${pad(startDate.getMonth()+1)}-${pad(startDate.getDate())}T${pad(startDate.getHours())}:${pad(startDate.getMinutes())}`
+                    }
+                    setForm(updatedForm)
+                  }}
+                />
+              )}
               <Input
-                label="Duration (minutes)"
+                label="Default Marks / Question"
                 type="number"
-                placeholder="e.g., 60"
-                value={form.duration_minutes}
-                onChange={(e) => setForm({ ...form, duration_minutes: e.target.value })}
+                placeholder="e.g., 5"
+                min="1"
+                value={defaultMarks}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => setDefaultMarks(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
               />
-              <Input
-                label="Total Marks"
-                type="number"
-                placeholder="e.g., 100"
-                value={form.total_marks}
-                onChange={(e) => setForm({ ...form, total_marks: e.target.value })}
-              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-text-primary tracking-tight">Total Marks</label>
+                <div className="w-full px-4 py-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-lg flex items-center">
+                  {totalMarks}
+                </div>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Start Time"
-                type="datetime-local"
-                value={form.start_time}
-                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-              />
-              <Input
-                label="End Time"
-                type="datetime-local"
-                value={form.end_time}
-                onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-              />
+              {form.assessment_type !== 'manual' && (
+                <div className="space-y-1">
+                  <Input
+                    label="Start Time"
+                    type="datetime-local"
+                    value={form.start_time}
+                    onChange={(e) => {
+                      const newStart = e.target.value
+                      const updatedForm = { ...form, start_time: newStart }
+                      // Auto-fill end_time = start + duration
+                      if (newStart && form.duration_minutes) {
+                        const startDate = new Date(newStart)
+                        startDate.setMinutes(startDate.getMinutes() + parseInt(form.duration_minutes))
+                        const pad = (n) => String(n).padStart(2, '0')
+                        updatedForm.end_time = `${startDate.getFullYear()}-${pad(startDate.getMonth()+1)}-${pad(startDate.getDate())}T${pad(startDate.getHours())}:${pad(startDate.getMinutes())}`
+                      }
+                      setForm(updatedForm)
+                    }}
+                  />
+                </div>
+              )}
+              <div className="space-y-1">
+                <Input
+                  label={form.assessment_type === 'manual' ? 'Deadline' : 'End Time'}
+                  type="datetime-local"
+                  value={form.end_time}
+                  onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+                />
+              </div>
             </div>
+            {/* Exam mode indicator */}
+            {form.start_time && form.end_time && form.duration_minutes && (() => {
+              const start = new Date(form.start_time)
+              const end = new Date(form.end_time)
+              const windowMinutes = Math.round((end - start) / 60000)
+              const dur = parseInt(form.duration_minutes)
+              const isStrict = windowMinutes <= dur
+              return (
+                <div className={`flex items-start gap-3 p-3 rounded-xl text-sm ${
+                  isStrict
+                    ? 'bg-amber-500/10 border border-amber-500/15 text-amber-400'
+                    : 'bg-primary/10 border border-primary/15 text-primary'
+                }`}>
+                  <span className="text-lg leading-none mt-0.5">{isStrict ? '⏱️' : '🪟'}</span>
+                  <div>
+                    <span className="font-semibold">{isStrict ? 'Strict Start Mode' : 'Flexible Window Mode'}</span>
+                    <p className="text-xs mt-0.5 opacity-80">
+                      {isStrict
+                        ? `All students must start at the scheduled time. Duration: ${dur} min.`
+                        : `Students can start anytime within a ${windowMinutes}-min window and get ${dur} min each.`
+                      }
+                    </p>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Section multi-select */}
             <div className="space-y-2">
@@ -365,8 +491,12 @@ export default function CreateAssessment() {
                       <Input
                         label="Marks"
                         type="number"
+                        placeholder="e.g., 5"
+                        min="1"
                         value={question.marks}
-                        onChange={(e) => updateMcqQuestion(qIndex, 'marks', parseInt(e.target.value) || 1)}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => updateMcqQuestion(qIndex, 'marks', e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
+                        onBlur={(e) => { if (e.target.value === '') updateMcqQuestion(qIndex, 'marks', 1) }}
                       />
                       <Select
                         label="Difficulty"
@@ -496,8 +626,12 @@ export default function CreateAssessment() {
                         <Input
                           label="Marks"
                           type="number"
+                          placeholder="e.g., 10"
+                          min="1"
                           value={question.marks}
-                          onChange={(e) => updateCodingQuestion(qIndex, 'marks', parseInt(e.target.value) || 1)}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateCodingQuestion(qIndex, 'marks', e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
+                          onBlur={(e) => { if (e.target.value === '') updateCodingQuestion(qIndex, 'marks', 1) }}
                         />
                         <Select
                           label="Difficulty"
@@ -511,8 +645,12 @@ export default function CreateAssessment() {
                         <Input
                           label="Time Limit (sec)"
                           type="number"
+                          placeholder="e.g., 5"
+                          min="1"
                           value={question.time_limit_seconds}
-                          onChange={(e) => updateCodingQuestion(qIndex, 'time_limit_seconds', parseInt(e.target.value) || 2)}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateCodingQuestion(qIndex, 'time_limit_seconds', e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
+                          onBlur={(e) => { if (e.target.value === '') updateCodingQuestion(qIndex, 'time_limit_seconds', 2) }}
                         />
                       </div>
 
@@ -563,6 +701,87 @@ export default function CreateAssessment() {
                             </label>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Manual Questions */}
+        {form.assessment_type === 'manual' && (
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-text-primary">Manual Questions</h2>
+              <Button type="button" variant="secondary" onClick={addManualQuestion}>
+                <Plus className="w-4 h-4" />
+                Add Question
+              </Button>
+            </div>
+
+            {manualQuestions.length === 0 ? (
+              <div className="text-center py-8 text-text-secondary">
+                <PenLine className="w-12 h-12 mx-auto mb-4" />
+                <p>No questions added yet. Click &quot;Add Question&quot; to get started.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {manualQuestions.map((question, qIndex) => (
+                  <div key={qIndex} className="p-4 bg-background rounded-xl">
+                    <div className="flex items-start justify-between mb-4">
+                      <span className="text-sm font-medium text-secondary">Question {qIndex + 1} ({question.question_id})</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeManualQuestion(qIndex)}
+                        className="text-error"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="space-y-4">
+                      <Textarea
+                        label="Question Text"
+                        placeholder="Enter the question"
+                        value={question.question_text}
+                        onChange={(e) => updateManualQuestion(qIndex, 'question_text', e.target.value)}
+                        rows={2}
+                      />
+                      <Textarea
+                        label="Model Answer (correct answer for AI evaluation)"
+                        placeholder="Enter the ideal/model answer"
+                        value={question.model_answer}
+                        onChange={(e) => updateManualQuestion(qIndex, 'model_answer', e.target.value)}
+                        rows={3}
+                      />
+                      <Input
+                        label="Keywords (comma separated)"
+                        placeholder="e.g., computer science, machines, learning, reasoning"
+                        value={question.keywords.join(', ')}
+                        onChange={(e) => updateManualQuestion(qIndex, 'keywords',
+                          e.target.value.split(',').map(k => k.trim()).filter(k => k)
+                        )}
+                      />
+                      <div className="grid grid-cols-2 gap-4">
+                        <Input
+                          label="Question ID"
+                          placeholder="e.g., Q1"
+                          value={question.question_id}
+                          onChange={(e) => updateManualQuestion(qIndex, 'question_id', e.target.value)}
+                        />
+                        <Input
+                          label="Marks"
+                          type="number"
+                          placeholder="e.g., 5"
+                          min="1"
+                          value={question.marks}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateManualQuestion(qIndex, 'marks', e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
+                          onBlur={(e) => { if (e.target.value === '') updateManualQuestion(qIndex, 'marks', 1) }}
+                        />
                       </div>
                     </div>
                   </div>

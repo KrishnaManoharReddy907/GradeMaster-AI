@@ -63,9 +63,9 @@ async def get_teacher_analytics(teacher_id: str) -> dict:
         sid = a.get("subject_id", "")
         assessment_subject[aid] = subject_map.get(sid, "Unknown")
 
-    # 2. Fetch all coding submissions for these assessments
+    # 2. Fetch all coding submissions (only finalized — teacher must review first)
     coding_subs = await db.coding_submissions.find(
-        {"assessment_id": {"$in": assessment_ids}}
+        {"assessment_id": {"$in": assessment_ids}, "status": "finalized"}
     ).to_list(length=5000)
 
     # 3. Fetch all MCQ submissions
@@ -73,9 +73,15 @@ async def get_teacher_analytics(teacher_id: str) -> dict:
         {"assessment_id": {"$in": assessment_ids}}
     ).to_list(length=5000)
 
-    # 4. Build unified DataFrame
+    # 4. Fetch all Manual submissions (only finalized — teacher must review first)
+    manual_subs = await db.manual_submissions.find(
+        {"assessment_id": {"$in": assessment_ids}, "status": "finalized"}
+    ).to_list(length=5000)
+
+    # 5. Build unified DataFrame
     rows = []
     for s in coding_subs:
+        # Only finalized coding subs reach here (filtered in query)
         score = s.get("final_score") or s.get("ai_score") or s.get("score") or 0
         max_marks = s.get("max_marks") or 1
         aid = s.get("assessment_id", "")
@@ -87,7 +93,7 @@ async def get_teacher_analytics(teacher_id: str) -> dict:
             "score": score,
             "max_marks": max_marks,
             "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
-            "status": s.get("status", "pending"),
+            "status": "finalized",
             "type": "coding",
             "submitted_at": s.get("submitted_at") or s.get("created_at"),
         })
@@ -106,6 +112,25 @@ async def get_teacher_analytics(teacher_id: str) -> dict:
             "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
             "status": "evaluated",
             "type": "mcq",
+            "submitted_at": s.get("submitted_at") or s.get("created_at"),
+        })
+
+    for s in manual_subs:
+        manual_eval = s.get("manual_evaluation", {})
+        # Only finalized manual subs reach here (filtered in query)
+        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        max_marks = manual_eval.get("total_marks") or 1
+        aid = s.get("assessment_id", "")
+        rows.append({
+            "student_id": s.get("student_id"),
+            "assessment_id": aid,
+            "assessment_title": assessment_map.get(aid, "Unknown"),
+            "subject": assessment_subject.get(aid, "Unknown"),
+            "score": score,
+            "max_marks": max_marks,
+            "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
+            "status": "finalized",
+            "type": "manual",
             "submitted_at": s.get("submitted_at") or s.get("created_at"),
         })
 
@@ -218,7 +243,7 @@ async def get_student_analytics(student_id: str) -> dict:
 
     # Fetch coding submissions
     coding_subs = await db.coding_submissions.find(
-        {"student_id": student_id}
+        {"student_id": student_id, "status": "finalized"}
     ).to_list(length=500)
 
     # Fetch MCQ submissions
@@ -226,10 +251,16 @@ async def get_student_analytics(student_id: str) -> dict:
         {"student_id": student_id}
     ).to_list(length=500)
 
+    # Fetch Manual submissions
+    manual_subs = await db.manual_submissions.find(
+        {"student_id": student_id}
+    ).to_list(length=500)
+
     # Get assessment details (title + subject)
     all_assessment_ids = list(set(
         [s.get("assessment_id") for s in coding_subs] +
-        [s.get("assessment_id") for s in mcq_subs]
+        [s.get("assessment_id") for s in mcq_subs] +
+        [s.get("assessment_id") for s in manual_subs]
     ))
 
     assessment_info = {}  # aid -> {title, subject_id}
@@ -261,6 +292,7 @@ async def get_student_analytics(student_id: str) -> dict:
     # Build rows
     rows = []
     for s in coding_subs:
+        # Only finalized coding subs reach here (filtered in query)
         score = s.get("final_score") or s.get("ai_score") or s.get("score") or 0
         max_marks = s.get("max_marks") or 1
         aid = s.get("assessment_id", "")
@@ -272,7 +304,7 @@ async def get_student_analytics(student_id: str) -> dict:
             "score": score,
             "max_marks": max_marks,
             "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
-            "status": s.get("status", "pending"),
+            "status": "finalized",
             "type": "coding",
             "submitted_at": s.get("submitted_at") or s.get("created_at"),
         })
@@ -291,6 +323,28 @@ async def get_student_analytics(student_id: str) -> dict:
             "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
             "status": "evaluated",
             "type": "mcq",
+            "submitted_at": s.get("submitted_at") or s.get("created_at"),
+        })
+
+    for s in manual_subs:
+        manual_eval = s.get("manual_evaluation", {})
+        manual_status = s.get("status", "evaluated")
+        # Only include finalized manual submissions in student analytics
+        if manual_status != "finalized":
+            continue
+        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        max_marks = manual_eval.get("total_marks") or 1
+        aid = s.get("assessment_id", "")
+        info = assessment_info.get(aid, {})
+        rows.append({
+            "assessment_id": aid,
+            "assessment_title": info.get("title", "Unknown"),
+            "subject": subject_map.get(info.get("subject_id", ""), "Unknown"),
+            "score": score,
+            "max_marks": max_marks,
+            "percentage": (score / max_marks * 100) if max_marks > 0 else 0,
+            "status": "finalized",
+            "type": "manual",
             "submitted_at": s.get("submitted_at") or s.get("created_at"),
         })
 

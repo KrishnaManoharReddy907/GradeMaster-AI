@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from bson import ObjectId
 
@@ -9,7 +9,11 @@ ALLOWED_CODING_LANGUAGES = ["python", "cpp", "java", "javascript"]
 
 
 async def check_assessment_active(assessment_id: str) -> dict:
-    """Check if assessment exists and is currently active."""
+    """Check if assessment exists and is currently active.
+    
+    Students get their full duration even if they start near end_time.
+    Grace period: end_time + duration_minutes.
+    """
     assessment = await get_assessment_by_id(assessment_id)
 
     if not assessment:
@@ -18,12 +22,16 @@ async def check_assessment_active(assessment_id: str) -> dict:
     now = datetime.now(timezone.utc)
     start_time = make_aware(assessment["start_time"])
     end_time = make_aware(assessment["end_time"])
+    duration_minutes = assessment.get("duration_minutes", 0)
 
     if now < start_time:
-        return {"error": "Assessment not active", "code": "forbidden"}
+        return {"error": "Assessment has not started yet", "code": "forbidden"}
 
-    if now > end_time:
-        return {"error": "Assessment not active", "code": "forbidden"}
+    # Allow submission up to end_time + duration so students who started
+    # near the end of the window still get their full exam duration.
+    grace_deadline = end_time + timedelta(minutes=duration_minutes)
+    if now > grace_deadline:
+        return {"error": "Assessment submission deadline has passed", "code": "forbidden"}
 
     return {"valid": True, "assessment": assessment}
 
@@ -259,6 +267,11 @@ async def get_student_submission_status(student_id: str, assessment_id: str) -> 
         "assessment_id": assessment_id
     }).to_list(length=100)
 
+    manual_submission = await db.manual_submissions.find_one({
+        "student_id": student_id,
+        "assessment_id": assessment_id
+    })
+
     return {
         "assessment_id": assessment_id,
         "mcq_submitted": mcq_submission is not None,
@@ -290,7 +303,13 @@ async def get_student_submission_status(student_id: str, assessment_id: str) -> 
                 "finalized_at": s.get("finalized_at"),
             }
             for s in coding_submissions
-        ]
+        ],
+        "manual_submitted": manual_submission is not None,
+        "manual_status": manual_submission.get("status", "evaluated") if manual_submission else None,
+        "manual_score": manual_submission.get("manual_evaluation", {}).get("total_score") if manual_submission else None,
+        "manual_adjusted_score": manual_submission.get("teacher_adjusted_score") if manual_submission else None,
+        "manual_total": manual_submission.get("manual_evaluation", {}).get("total_marks") if manual_submission else None,
+        "manual_percentage": manual_submission.get("manual_evaluation", {}).get("percentage") if manual_submission else None,
     }
 
 
@@ -306,7 +325,12 @@ async def get_student_submissions(student_id: str) -> dict:
         "student_id": student_id
     }).sort("submitted_at", -1).to_list(length=100)
 
+    manual_submissions = await db.manual_submissions.find({
+        "student_id": student_id
+    }).sort("submitted_at", -1).to_list(length=100)
+
     return {
         "mcq_submissions": mcq_submissions,
-        "coding_submissions": coding_submissions
+        "coding_submissions": coding_submissions,
+        "manual_submissions": manual_submissions,
     }

@@ -148,7 +148,7 @@ export default function TeacherDashboard() {
                     <div>
                       <h3 className="font-medium text-text-primary">{assessment.title}</h3>
                       <p className="text-sm text-text-secondary mt-0.5">
-                        {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : 'Mixed'} Assessment
+                        {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : aType === 'manual' ? 'Handwritten' : 'Mixed'} Assessment
                       </p>
                     </div>
                     <div className="flex items-center gap-3">

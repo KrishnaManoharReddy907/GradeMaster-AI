@@ -102,10 +102,12 @@ export default function Submissions() {
             {submissions.length} submission{submissions.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button onClick={handleBatchEvaluate} loading={evaluating.batch}>
-          <Bot className="w-5 h-5" />
-          Evaluate All with AI
-        </Button>
+        {assessment?.assessment_type !== 'manual' && (
+          <Button onClick={handleBatchEvaluate} loading={evaluating.batch}>
+            <Bot className="w-5 h-5" />
+            Evaluate All with AI
+          </Button>
+        )}
       </div>
 
       {/* Submissions Table */}
@@ -150,7 +152,7 @@ export default function Submissions() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="default">
-                        {submission.type === 'mcq' ? 'MCQ' : 'Coding'}
+                        {submission.type === 'mcq' ? 'MCQ' : submission.type === 'manual' ? 'Handwritten' : 'Coding'}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -177,7 +179,7 @@ export default function Submissions() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {status === 'pending' && (
+                        {status === 'pending' && submission.type !== 'manual' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -188,7 +190,7 @@ export default function Submissions() {
                             <Play className="w-4 h-4" />
                           </Button>
                         )}
-                        {(status === 'evaluated' || status === 'pending') && (
+                        {(status === 'evaluated' || status === 'pending') && submission.type !== 'manual' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -199,7 +201,27 @@ export default function Submissions() {
                             Review
                           </Button>
                         )}
-                        {(status === 'reviewed' || status === 'finalized') && (
+                        {submission.type === 'manual' && status === 'evaluated' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/teacher/manual-submissions/${submission.id}/review`)}
+                          >
+                            <Eye className="w-4 h-4" />
+                            Review
+                          </Button>
+                        )}
+                        {submission.type === 'manual' && status === 'finalized' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/teacher/manual-submissions/${submission.id}/review`)}
+                          >
+                            <Eye className="w-4 h-4" />
+                            View Details
+                          </Button>
+                        )}
+                        {submission.type !== 'manual' && (status === 'reviewed' || status === 'finalized') && (
                           <Button
                             variant="ghost"
                             size="sm"

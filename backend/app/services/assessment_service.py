@@ -50,11 +50,13 @@ async def create_assessment(teacher_id: str, data) -> dict:
     db = get_database()
 
     now = datetime.now(timezone.utc)
-    start_time = make_aware(data.start_time)
+    start_time = make_aware(data.start_time) if data.start_time else now
     end_time = make_aware(data.end_time)
 
-    if start_time <= now:
-        return {"error": "Start time must be in the future"}
+    # Skip start_time validation for manual assignments (they start immediately)
+    if data.assessment_type.value != "manual":
+        if start_time <= now:
+            return {"error": "Start time must be in the future"}
 
     if start_time >= end_time:
         return {"error": "End time must be after start time"}
@@ -94,6 +96,15 @@ async def create_assessment(teacher_id: str, data) -> dict:
         for q in data.coding_questions:
             coding_questions.append(q.model_dump())
 
+    manual_questions = []
+    if data.manual_questions:
+        for q in data.manual_questions:
+            manual_questions.append(q.model_dump())
+
+    # For manual assignments: start_time defaults to now, duration is optional
+    start_time = data.start_time if data.start_time else datetime.now(timezone.utc)
+    end_time = data.end_time
+
     assessment_dict = {
         "title": data.title,
         "description": data.description,
@@ -103,15 +114,16 @@ async def create_assessment(teacher_id: str, data) -> dict:
         "assessment_type": data.assessment_type.value,
         "duration_minutes": data.duration_minutes,
         "total_marks": data.total_marks,
-        "start_time": data.start_time,
-        "end_time": data.end_time,
+        "start_time": start_time,
+        "end_time": end_time,
         "teacher_id": teacher_id,
         "mcq_questions": mcq_questions,
         "coding_questions": coding_questions,
+        "manual_questions": manual_questions,
         "coding_config": data.coding_config.model_dump() if data.coding_config else None,
         "rules": data.rules.model_dump(),
         "instructions": data.instructions,
-        "status": calculate_assessment_status(data.start_time, data.end_time),
+        "status": calculate_assessment_status(start_time, end_time),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -180,10 +192,14 @@ async def get_student_assessments(student: dict) -> List[dict]:
         start_time = make_aware(assessment["start_time"])
         end_time = make_aware(assessment["end_time"])
 
-        if now < start_time or now > end_time:
-            continue
+        # Compute status dynamically
+        if now < start_time:
+            status = "upcoming"
+        elif now > end_time:
+            status = "ended"
+        else:
+            status = "active"
 
-        assessment["status"] = "active"
         safe_assessment = {
             "_id": assessment["_id"],
             "title": assessment["title"],
@@ -194,7 +210,7 @@ async def get_student_assessments(student: dict) -> List[dict]:
             "total_marks": assessment["total_marks"],
             "start_time": assessment["start_time"],
             "end_time": assessment["end_time"],
-            "status": assessment["status"],
+            "status": status,
             "instructions": assessment.get("instructions")
         }
         result.append(safe_assessment)

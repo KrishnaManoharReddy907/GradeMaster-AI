@@ -16,3 +16,9 @@ tree-sitter-python
 pandas
 plotly
 reportlab
+python-multipart
+Pillow
+PyMuPDF
+openai
+google-generativeai
+google-genai

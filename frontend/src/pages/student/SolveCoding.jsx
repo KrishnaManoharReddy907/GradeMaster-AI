@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Send, AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { ArrowLeft, Send, AlertTriangle, CheckCircle, Info, Clock } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { studentAPI } from '../../lib/api'
 import Card from '../../components/Card'
@@ -131,12 +131,22 @@ export default function SolveCoding() {
   const [language, setLanguage] = useState('python')
   const [code, setCode] = useState(DEFAULT_CODE.python)
   const [codeWarnings, setCodeWarnings] = useState([])
+  const [timeLeft, setTimeLeft] = useState(null)
+  const timerRef = useRef(null)
+  const startTimeRef = useRef(null)
 
   useEffect(() => {
     const fetchAssessment = async () => {
       try {
         const data = await studentAPI.getAssessmentDetail(token, id)
         setAssessment(data)
+
+        // Initialize timer
+        const duration = data.duration_minutes || data.duration
+        if (duration) {
+          setTimeLeft(duration * 60)
+          startTimeRef.current = Date.now()
+        }
       } catch (error) {
         console.error('Failed to fetch assessment:', error)
         addToast(error.message || 'Failed to load assessment', 'error')
@@ -148,6 +158,51 @@ export default function SolveCoding() {
 
     fetchAssessment()
   }, [id, token, addToast, navigate])
+
+  // Timer countdown
+  useEffect(() => {
+    if (timeLeft === null || timeLeft <= 0) return
+
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timerRef.current)
+  }, [timeLeft !== null]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-submit when timer hits 0
+  useEffect(() => {
+    if (timeLeft === 0 && !submitting) {
+      addToast('Time is up! Auto-submitting your code...', 'warning')
+      handleSubmit()
+    }
+  }, [timeLeft]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prevent accidental navigation
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
+  // Format time display
+  const formatTime = (seconds) => {
+    if (seconds === null) return null
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  const isCriticalTime = timeLeft !== null && timeLeft <= 300 // < 5 min
 
   // Validate code on change
   useEffect(() => {
@@ -222,6 +277,17 @@ export default function SolveCoding() {
           <h1 className="text-2xl font-bold text-text-primary">{assessment.title}</h1>
           <p className="text-text-secondary mt-1">Coding Assessment</p>
         </div>
+        {/* Timer */}
+        {timeLeft !== null && (
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-xl font-mono text-lg font-bold ${
+            isCriticalTime
+              ? 'bg-error/10 text-error border border-error/30 animate-pulse'
+              : 'bg-primary/10 text-primary border border-primary/30'
+          }`}>
+            <Clock className="w-5 h-5" />
+            {formatTime(timeLeft)}
+          </div>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">

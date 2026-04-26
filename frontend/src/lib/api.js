@@ -244,6 +244,24 @@ export const teacherAPI = {
     })
     return handleResponse(response)
   },
+
+  // Manual submission review
+  getManualSubmission: async (token, submissionId) => {
+    const response = await fetch(`${BASE_URL}/api/teacher/manual-submission/${submissionId}`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
+  reviewManualSubmission: async (token, submissionId, data) => {
+    const response = await fetch(`${BASE_URL}/api/teacher/manual-submission/${submissionId}/review`, {
+      method: 'PUT',
+      headers: getHeaders(token),
+      body: JSON.stringify(data),
+    })
+    return handleResponse(response)
+  },
 }
 
 // STUDENT APIs
@@ -290,10 +308,58 @@ export const studentAPI = {
     return handleResponse(response)
   },
 
+  getAllSubmissions: async (token) => {
+    const response = await fetch(`${BASE_URL}/api/student/all-submissions`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
+  getManualSubmissionDetail: async (token, assessmentId) => {
+    const response = await fetch(`${BASE_URL}/api/student/manual-submission-detail/${assessmentId}`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
   getSubmission: async (token, submissionId) => {
     const response = await fetch(`${BASE_URL}/api/student/submission/${submissionId}`, {
       method: 'GET',
       headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
+  // Manual (Handwritten) Assignment APIs
+  uploadHandwritten: async (token, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch(`${BASE_URL}/api/student/upload-handwritten`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    })
+    return handleResponse(response)
+  },
+
+  processHandwritten: async (token, rawText, questions = null) => {
+    const body = { raw_text: rawText }
+    if (questions) body.questions = questions
+    const response = await fetch(`${BASE_URL}/api/student/process-handwritten`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify(body),
+    })
+    return handleResponse(response)
+  },
+
+  evaluateHandwritten: async (token, data) => {
+    const response = await fetch(`${BASE_URL}/api/student/evaluate-handwritten`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify(data),
     })
     return handleResponse(response)
   },
@@ -359,5 +425,20 @@ export const analyticsAPI = {
     a.click()
     a.remove()
     window.URL.revokeObjectURL(url)
+  },
+
+  getAssessmentReport: async (token, assessmentId) => {
+    const response = await fetch(`${BASE_URL}/api/analytics/assessment-report/${assessmentId}`, {
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
+  regenerateAssessmentReport: async (token, assessmentId) => {
+    const response = await fetch(`${BASE_URL}/api/analytics/assessment-report/${assessmentId}/regenerate`, {
+      method: 'POST',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
   },
 }

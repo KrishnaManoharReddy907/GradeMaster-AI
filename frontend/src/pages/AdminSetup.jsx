@@ -102,7 +102,7 @@ export default function AdminSetup() {
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-2">Initial Setup</h1>
           <p className="text-text-secondary">
-            Create the administrator account to get started with GradeMaster AI
+            Create the administrator account to get started with GradeMaster
           </p>
         </div>
 

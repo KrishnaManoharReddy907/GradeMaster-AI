@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, XCircle, Clock, Code, FileQuestion, Bot, User, Shield, Bug, Lightbulb, TestTube } from 'lucide-react'
+import { ArrowLeft, CheckCircle, XCircle, Clock, Code, FileQuestion, Bot, User, Shield, Bug, Lightbulb, TestTube, PenLine, Award, MessageSquare } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { studentAPI } from '../../lib/api'
 import Card from '../../components/Card'
@@ -27,6 +27,7 @@ export default function SubmissionDetails() {
   const [loading, setLoading] = useState(true)
   const [assessment, setAssessment] = useState(null)
   const [submissionStatus, setSubmissionStatus] = useState(null)
+  const [manualDetail, setManualDetail] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -41,6 +42,16 @@ export default function SubmissionDetails() {
         
         setAssessment(found || { title: 'Assessment', assessment_type: 'unknown' })
         setSubmissionStatus(statusData)
+
+        // If manual submitted, fetch detailed results
+        if (statusData.manual_submitted) {
+          try {
+            const detail = await studentAPI.getManualSubmissionDetail(token, id)
+            setManualDetail(detail)
+          } catch {
+            // Detail may not be available yet
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch submission details:', error)
         addToast('Failed to load submission details', 'error')
@@ -76,7 +87,8 @@ export default function SubmissionDetails() {
           </h1>
           <p className="text-text-secondary mt-1">
             {(assessment?.assessment_type || 'unknown') === 'mcq' ? 'MCQ' : 
-             (assessment?.assessment_type || 'unknown') === 'coding' ? 'Coding' : 'Mixed'} Assessment
+             (assessment?.assessment_type || 'unknown') === 'coding' ? 'Coding' :
+             (assessment?.assessment_type || 'unknown') === 'manual' ? 'Handwritten' : 'Mixed'} Assessment
           </p>
         </div>
       </div>
@@ -330,8 +342,163 @@ export default function SubmissionDetails() {
         )
       })}
 
+      {/* Manual Assignment Results */}
+      {submissionStatus.manual_submitted && (
+        <div className="space-y-4">
+          {/* Header with score overview */}
+          <Card>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center">
+                <PenLine className="w-5 h-5 text-secondary" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold text-text-primary">Handwritten Assignment</h2>
+                <Badge variant={submissionStatus.manual_status === 'finalized' ? 'success' : 'warning'} className="mt-1">
+                  {submissionStatus.manual_status === 'finalized' ? 'Reviewed' : 'Awaiting Review'}
+                </Badge>
+              </div>
+            </div>
+
+            {submissionStatus.manual_status === 'finalized' && manualDetail ? (
+              <div className="space-y-4">
+                {/* Score cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-background rounded-xl p-4 text-center">
+                    <p className="text-3xl font-bold text-primary">
+                      {manualDetail.final_score ?? '-'}
+                    </p>
+                    <p className="text-sm text-text-secondary mt-1">Final Score</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-4 text-center">
+                    <p className="text-3xl font-bold text-text-primary">{manualDetail.total_marks ?? '-'}</p>
+                    <p className="text-sm text-text-secondary mt-1">Total Marks</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-4 text-center">
+                    <p className="text-3xl font-bold text-success">
+                      {manualDetail.total_marks && manualDetail.final_score != null
+                        ? `${Math.round((manualDetail.final_score / manualDetail.total_marks) * 100)}%`
+                        : '-'}
+                    </p>
+                    <p className="text-sm text-text-secondary mt-1">Percentage</p>
+                  </div>
+                </div>
+
+                {/* Teacher feedback */}
+                {manualDetail.teacher_feedback && (
+                  <div className="p-4 bg-success/5 border border-success/10 rounded-xl">
+                    <div className="flex items-start gap-2">
+                      <User className="w-4 h-4 text-success mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-success mb-1">Teacher Feedback</p>
+                        <p className="text-sm text-text-primary">{manualDetail.teacher_feedback}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Clock className="w-12 h-12 text-warning mx-auto mb-4 opacity-50" />
+                <h3 className="text-lg font-medium text-text-primary mb-2">Awaiting Teacher Review</h3>
+                <p className="text-text-secondary">Your assignment has been submitted. Results will be available after your teacher reviews it.</p>
+              </div>
+            )}
+          </Card>
+
+          {/* Per-question detailed results (only after review) */}
+          {submissionStatus.manual_status === 'finalized' && manualDetail?.question_results?.map((q, i) => {
+            const scorePct = q.max_marks > 0 ? (q.final_score / q.max_marks) * 100 : 0
+            const getScoreColor = (pct) => {
+              if (pct >= 80) return 'text-emerald-400'
+              if (pct >= 50) return 'text-amber-400'
+              return 'text-red-400'
+            }
+            return (
+              <Card key={q.question_id || i}>
+                {/* Question header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center">
+                      <span className="text-sm font-bold text-secondary">{q.question_id || i + 1}</span>
+                    </div>
+                    <h3 className="text-sm font-semibold text-text-primary">{q.question_text}</h3>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-sm font-bold ${getScoreColor(scorePct)}`}>
+                    {q.final_score} / {q.max_marks}
+                  </div>
+                </div>
+
+                {/* Student's answer */}
+                {q.student_answer && (
+                  <div className="mb-4">
+                    <p className="text-xs font-medium text-text-secondary mb-1 uppercase tracking-wider">Your Answer</p>
+                    <div className="p-3 bg-surface-light/50 rounded-xl text-sm text-text-primary whitespace-pre-wrap leading-relaxed">
+                      {q.student_answer}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Feedback */}
+                {q.feedback && (
+                  <div className="mb-4 p-3 bg-primary/5 border border-primary/10 rounded-xl">
+                    <div className="flex items-start gap-2">
+                      <Lightbulb className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-primary mb-1">AI Feedback</p>
+                        <p className="text-sm text-text-primary">{q.feedback}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Correctness & completeness badges */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {q.correctness && (
+                    <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
+                      q.correctness === 'good' ? 'bg-emerald-500/10 text-emerald-400' :
+                      q.correctness === 'partial' ? 'bg-amber-500/10 text-amber-400' :
+                      'bg-red-500/10 text-red-400'
+                    }`}>
+                      Correctness: {q.correctness}
+                    </span>
+                  )}
+                  {q.completeness && (
+                    <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
+                      q.completeness === 'complete' ? 'bg-emerald-500/10 text-emerald-400' :
+                      q.completeness === 'partial' ? 'bg-amber-500/10 text-amber-400' :
+                      'bg-red-500/10 text-red-400'
+                    }`}>
+                      Completeness: {q.completeness}
+                    </span>
+                  )}
+                </div>
+
+                {/* Keywords matched / missed */}
+                {(q.keywords_matched?.length > 0 || q.keywords_missed?.length > 0) && (
+                  <div>
+                    <p className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">Keywords</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {q.keywords_matched?.map((kw, j) => (
+                        <span key={`m-${j}`} className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs rounded-lg border border-emerald-500/20">
+                          ✓ {kw}
+                        </span>
+                      ))}
+                      {q.keywords_missed?.map((kw, j) => (
+                        <span key={`x-${j}`} className="px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded-lg border border-red-500/20">
+                          ✗ {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+
       {/* No submission data */}
-      {!submissionStatus.mcq_submitted && !submissionStatus.coding_submitted && (
+      {!submissionStatus.mcq_submitted && !submissionStatus.coding_submitted && !submissionStatus.manual_submitted && (
         <Card>
           <div className="text-center py-12">
             <Clock className="w-12 h-12 text-text-secondary mx-auto mb-4" />

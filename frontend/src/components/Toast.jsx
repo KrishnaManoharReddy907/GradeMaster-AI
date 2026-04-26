@@ -21,8 +21,8 @@ export default function Toast({ message, type = 'info', onClose }) {
   return (
     <div
       className={clsx(
-        'toast-enter flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-sm',
-        'min-w-[300px] max-w-[400px] shadow-lg',
+        'toast-enter flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-xl',
+        'min-w-[300px] max-w-[400px] shadow-xl shadow-black/20',
         styles[type]
       )}
     >

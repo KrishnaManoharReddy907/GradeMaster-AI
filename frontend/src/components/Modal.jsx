@@ -36,14 +36,14 @@ export default function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/70 backdrop-blur-md"
         onClick={onClose}
       />
       
       {/* Modal */}
       <div
         className={twMerge(clsx(
-          'relative bg-card rounded-xl border border-border shadow-2xl',
+          'relative glass-card bg-card rounded-2xl shadow-2xl shadow-black/30',
           'w-full mx-4 max-h-[90vh] overflow-auto',
           sizes[size],
           className
@@ -51,13 +51,13 @@ export default function Modal({
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
+            <h2 className="text-lg font-semibold text-text-primary tracking-tight">{title}</h2>
             <button
               onClick={onClose}
-              className="p-1 hover:bg-background rounded-lg transition-colors"
+              className="p-1.5 hover:bg-white/[0.06] rounded-lg transition-colors"
             >
-              <X className="w-5 h-5 text-text-secondary" />
+              <X className="w-4.5 h-4.5 text-text-secondary" />
             </button>
           </div>
         )}

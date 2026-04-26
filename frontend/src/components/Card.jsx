@@ -10,8 +10,8 @@ export default function Card({
   return (
     <div
       className={twMerge(clsx(
-        'bg-card rounded-xl border border-border p-6',
-        hover && 'hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 cursor-pointer',
+        'glass-card rounded-2xl p-6 transition-all duration-300',
+        hover && 'hover-lift glow-hover cursor-pointer',
         className
       ))}
       {...props}
@@ -31,7 +31,7 @@ export function CardHeader({ children, className }) {
 
 export function CardTitle({ children, className }) {
   return (
-    <h3 className={twMerge('text-lg font-semibold text-text-primary', className)}>
+    <h3 className={twMerge('text-lg font-semibold text-text-primary tracking-tight', className)}>
       {children}
     </h3>
   )
@@ -39,7 +39,7 @@ export function CardTitle({ children, className }) {
 
 export function CardDescription({ children, className }) {
   return (
-    <p className={twMerge('text-sm text-text-secondary mt-1', className)}>
+    <p className={twMerge('text-sm text-text-secondary mt-1 leading-relaxed', className)}>
       {children}
     </p>
   )
@@ -55,7 +55,7 @@ export function CardContent({ children, className }) {
 
 export function CardFooter({ children, className }) {
   return (
-    <div className={twMerge('mt-4 pt-4 border-t border-border flex items-center gap-2', className)}>
+    <div className={twMerge('mt-4 pt-4 border-t border-white/[0.06] flex items-center gap-2', className)}>
       {children}
     </div>
   )

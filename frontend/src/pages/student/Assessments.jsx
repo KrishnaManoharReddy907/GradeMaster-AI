@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Code, FileQuestion, Clock, CheckCircle } from 'lucide-react'
+import { Code, FileQuestion, Clock, CheckCircle, PenLine } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { studentAPI } from '../../lib/api'
 import Card, { CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../../components/Card'
@@ -27,7 +27,7 @@ export default function Assessments() {
         await Promise.all(assessmentList.map(async (assessment) => {
           try {
             const statusData = await studentAPI.getSubmissionStatus(token, assessment.id)
-            statusMap[assessment.id] = statusData.mcq_submitted || statusData.coding_submitted
+            statusMap[assessment.id] = statusData.mcq_submitted || statusData.coding_submitted || statusData.manual_submitted
           } catch {
             statusMap[assessment.id] = false
           }
@@ -48,6 +48,8 @@ export default function Assessments() {
     const aType = assessment.assessment_type || assessment.type || 'mcq'
     if (aType === 'mcq') {
       navigate(`/student/assessments/${assessment.id}/mcq`)
+    } else if (aType === 'manual') {
+      navigate(`/student/assessments/${assessment.id}/manual`)
     } else {
       navigate(`/student/assessments/${assessment.id}/coding`)
     }
@@ -93,10 +95,12 @@ export default function Assessments() {
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                      aType === 'mcq' ? 'bg-primary/10' : 'bg-success/10'
+                      aType === 'mcq' ? 'bg-primary/10' : aType === 'manual' ? 'bg-secondary/10' : 'bg-success/10'
                     }`}>
                       {aType === 'mcq' ? (
                         <FileQuestion className="w-5 h-5 text-primary" />
+                      ) : aType === 'manual' ? (
+                        <PenLine className="w-5 h-5 text-secondary" />
                       ) : (
                         <Code className="w-5 h-5 text-success" />
                       )}
@@ -112,12 +116,17 @@ export default function Assessments() {
                 </CardHeader>
                 
                 <CardContent className="flex-1">
-                  <div className="flex items-center gap-4 text-sm text-text-secondary">
+                  <div className="flex items-center gap-4 text-sm text-text-secondary flex-wrap">
                     <span className="flex items-center gap-1.5">
                       {aType === 'mcq' ? (
                         <>
                           <FileQuestion className="w-4 h-4" />
                           MCQ
+                        </>
+                      ) : aType === 'manual' ? (
+                        <>
+                          <PenLine className="w-4 h-4" />
+                          Handwritten
                         </>
                       ) : (
                         <>
@@ -132,6 +141,39 @@ export default function Assessments() {
                         {duration} min
                       </span>
                     )}
+                    {/* Exam mode indicator */}
+                    {(() => {
+                      if (aType === 'manual') {
+                        return (
+                          <span
+                            className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium bg-secondary/10 text-secondary border border-secondary/15"
+                            title="Submit before the deadline"
+                          >
+                            📋 Deadline
+                          </span>
+                        )
+                      }
+                      const startT = assessment.start_time ? new Date(assessment.start_time) : null
+                      const endT = assessment.end_time ? new Date(assessment.end_time) : null
+                      if (!startT || !endT || !duration) return null
+                      const windowMin = Math.round((endT - startT) / 60000)
+                      const isStrict = windowMin <= duration
+                      return (
+                        <span
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium ${
+                            isStrict
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/15'
+                              : 'bg-primary/10 text-primary border border-primary/15'
+                          }`}
+                          title={isStrict
+                            ? 'Fixed start time — exam begins at the scheduled time'
+                            : `Flexible — start anytime within the ${windowMin}-min window`
+                          }
+                        >
+                          {isStrict ? '⏱️ Fixed' : '🪟 Window'}
+                        </span>
+                      )
+                    })()}
                   </div>
                 </CardContent>
 

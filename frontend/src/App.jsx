@@ -14,6 +14,7 @@ import StudentDashboard from './pages/student/StudentDashboard'
 import StudentAssessments from './pages/student/Assessments'
 import SolveMCQ from './pages/student/SolveMCQ'
 import SolveCoding from './pages/student/SolveCoding'
+import SolveManual from './pages/student/SolveManual'
 import SubmissionStatus from './pages/student/SubmissionStatus'
 import StudentSubmissionDetails from './pages/student/SubmissionDetails'
 import StudentAnalytics from './pages/student/Analytics'
@@ -26,7 +27,9 @@ import Submissions from './pages/teacher/Submissions'
 import EvaluateSubmission from './pages/teacher/EvaluateSubmission'
 import ReviewSubmission from './pages/teacher/ReviewSubmission'
 import ReviewHistory from './pages/teacher/ReviewHistory'
+import ManualReview from './pages/teacher/ManualReview'
 import TeacherAnalytics from './pages/teacher/Analytics'
+import AssessmentReport from './pages/teacher/AssessmentReport'
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard'
@@ -103,6 +106,7 @@ export default function App() {
           <Route path="assessments" element={<StudentAssessments />} />
           <Route path="assessments/:id/mcq" element={<SolveMCQ />} />
           <Route path="assessments/:id/coding" element={<SolveCoding />} />
+          <Route path="assessments/:id/manual" element={<SolveManual />} />
           <Route path="submissions" element={<SubmissionStatus />} />
           <Route path="submissions/:id" element={<StudentSubmissionDetails />} />
           <Route path="analytics" element={<StudentAnalytics />} />
@@ -121,6 +125,8 @@ export default function App() {
           <Route path="submissions/:id/evaluate" element={<EvaluateSubmission />} />
           <Route path="submissions/:id/review" element={<ReviewSubmission />} />
           <Route path="submissions/:id/history" element={<ReviewHistory />} />
+          <Route path="manual-submissions/:id/review" element={<ManualReview />} />
+          <Route path="assessments/:id/report" element={<AssessmentReport />} />
           <Route path="analytics" element={<TeacherAnalytics />} />
         </Route>
 

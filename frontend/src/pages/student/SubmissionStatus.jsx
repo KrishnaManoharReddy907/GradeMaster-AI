@@ -11,6 +11,7 @@ import { TableSkeleton } from '../../components/Loader'
 
 const statusConfig = {
   pending: { variant: 'warning', label: 'Pending', icon: Clock },
+  awaiting_review: { variant: 'warning', label: 'Awaiting Review', icon: Clock },
   submitted: { variant: 'primary', label: 'Submitted', icon: CheckCircle },
   evaluated: { variant: 'primary', label: 'AI Evaluated', icon: CheckCircle },
   reviewed: { variant: 'success', label: 'Reviewed', icon: CheckCircle },
@@ -27,50 +28,20 @@ export default function SubmissionStatus() {
   useEffect(() => {
     const fetchSubmissions = async () => {
       try {
-        // Step 1: Get all available assessments
-        const assessmentsResponse = await studentAPI.getAssessments(token)
-        const assessmentList = Array.isArray(assessmentsResponse) 
-          ? assessmentsResponse 
-          : assessmentsResponse.assessments || []
-        
-        // Step 2: For EVERY assessment, check submission status
-        // Don't filter by assessment status — the assessment is always "active"
-        // but the student may have already submitted
-        const submissionPromises = assessmentList.map(async (assessment) => {
-          try {
-            const statusData = await studentAPI.getSubmissionStatus(token, assessment.id)
-            
-            // Only include if student has actually submitted something
-            const hasSubmitted = statusData.mcq_submitted || statusData.coding_submitted
-            if (!hasSubmitted) return null
-            
-            return {
-              ...statusData,
-              assessmentTitle: assessment.title,
-              assessmentType: assessment.assessment_type || 'mcq',
-              assessmentId: assessment.id,
-              status: statusData.coding_submitted
-                ? (statusData.coding_submissions?.[0]?.status || 'submitted')
-                : 'evaluated', // MCQ is auto-evaluated
-              score: statusData.mcq_submitted
-                ? statusData.mcq_score
-                : (() => {
-                    const cs = statusData.coding_submissions?.[0]
-                    return cs?.final_score ?? cs?.ai_score ?? cs?.score ?? null
-                  })(),
-              total_marks: statusData.mcq_submitted
-                ? statusData.mcq_total
-                : statusData.coding_submissions?.[0]?.max_marks,
-              submitted_at: new Date().toISOString(),
-            }
-          } catch (error) {
-            // If submission status fails, skip this assessment
-            return null
+        // Use the new all-submissions endpoint (returns past + present)
+        const data = await studentAPI.getAllSubmissions(token)
+        const subs = data.submissions || []
+
+        // Map status for manual awaiting review
+        const mapped = subs.map(s => {
+          let displayStatus = s.status
+          if (s.submissionType === 'manual' && s.status !== 'finalized') {
+            displayStatus = 'awaiting_review'
           }
+          return { ...s, status: displayStatus }
         })
-        
-        const results = await Promise.all(submissionPromises)
-        setSubmissions(results.filter(Boolean))
+
+        setSubmissions(mapped)
       } catch (error) {
         console.error('Failed to fetch submissions:', error)
         addToast('Failed to load submissions', 'error')
@@ -148,7 +119,8 @@ export default function SubmissionStatus() {
                     <TableCell>
                       <Badge variant="default">
                         {submission.assessmentType === 'mcq' ? 'MCQ' : 
-                         submission.assessmentType === 'coding' ? 'Coding' : 'Mixed'}
+                         submission.assessmentType === 'coding' ? 'Coding' :
+                         submission.assessmentType === 'manual' ? 'Handwritten' : 'Mixed'}
                       </Badge>
                     </TableCell>
                     <TableCell>
