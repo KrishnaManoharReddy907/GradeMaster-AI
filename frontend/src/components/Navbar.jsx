@@ -59,7 +59,7 @@ export default function Navbar() {
   }
 
   return (
-    <header className="h-14 bg-card/70 backdrop-blur-xl border-b border-white/[0.06] sticky top-0 z-40">
+    <header className="h-14 bg-card/90 backdrop-blur-xl border-b border-white/[0.08] sticky top-0 z-40" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3), 0 8px 24px -6px rgba(0,0,0,0.25), inset 0 -1px 0 rgba(255,255,255,0.03)' }}>
       <div className="h-full px-4 flex items-center gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2.5 shrink-0">
@@ -74,7 +74,7 @@ export default function Navbar() {
         {/* Nav Links */}
         {user && (
           <nav className="flex-1 flex items-center justify-center">
-            <div className="flex items-center gap-0.5 bg-white/[0.03] rounded-xl px-1 py-1 border border-white/[0.04]">
+            <div className="flex items-center gap-0.5 rounded-xl px-1 py-1 border border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.03)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.2), 0 1px 0 rgba(255,255,255,0.03)' }}>
               {links.map((link) => (
                 <NavLink
                   key={link.to}
@@ -83,8 +83,8 @@ export default function Navbar() {
                   className={({ isActive }) => clsx(
                     'flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200',
                     isActive
-                      ? 'bg-primary text-white shadow-sm shadow-primary/25'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-white/[0.04]'
+                      ? 'bg-primary text-white shadow-md shadow-primary/30'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-white/[0.06] hover:shadow-sm'
                   )}
                 >
                   <link.icon className="w-3.5 h-3.5" />
@@ -100,7 +100,7 @@ export default function Navbar() {
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition-all duration-200"
+            className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/[0.06] transition-all duration-200 micro-depth"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? (
@@ -113,7 +113,7 @@ export default function Navbar() {
           {user && (
             <>
               {/* Role Badge */}
-              <span className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium uppercase tracking-wider ${roleColors[user.role] || 'bg-primary/10 text-primary'}`}>
+              <span className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium uppercase tracking-wider micro-depth ${roleColors[user.role] || 'bg-primary/10 text-primary'}`}>
                 {user.role}
               </span>
 
@@ -125,7 +125,7 @@ export default function Navbar() {
               {/* Logout */}
               <button
                 onClick={handleLogout}
-                className="p-2 rounded-lg text-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+                className="p-2 rounded-lg text-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 micro-depth"
                 title="Logout"
               >
                 <LogOut className="w-4 h-4" />

@@ -17,11 +17,12 @@ export default function Input({
       )}
       <input
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'w-full px-4 py-2.5 rounded-xl bg-surface-light/30 border border-border',
           'text-text-primary placeholder:text-text-muted text-sm',
           'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200',
-          'hover:border-white/[0.15]',
+          'hover:border-primary/30 hover:translate-y-[-0.5px]',
+          'micro-depth',
           error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}
@@ -51,11 +52,12 @@ export function Select({
       )}
       <select
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'w-full px-4 py-2.5 rounded-xl bg-surface-light/30 border border-border',
           'text-text-primary text-sm',
           'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200',
-          'hover:border-white/[0.15]',
+          'hover:border-primary/30 hover:translate-y-[-0.5px]',
+          'micro-depth',
           error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}
@@ -86,11 +88,12 @@ export function Textarea({
       )}
       <textarea
         className={twMerge(clsx(
-          'w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]',
+          'w-full px-4 py-2.5 rounded-xl bg-surface-light/30 border border-border',
           'text-text-primary placeholder:text-text-muted text-sm',
           'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
           'transition-all duration-200 resize-none',
-          'hover:border-white/[0.15]',
+          'hover:border-primary/30 hover:translate-y-[-0.5px]',
+          'micro-depth',
           error && 'border-error/50 focus:ring-error/30 focus:border-error/50',
           className
         ))}

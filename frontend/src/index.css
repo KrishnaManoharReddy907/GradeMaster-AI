@@ -148,19 +148,82 @@
   }
   .hover-lift:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow:
+      0 8px 25px -5px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
   }
 
-  /* Glass card effect */
+  /* Micro-depth — secondary elevation for interactive elements resting on cards */
+  .micro-depth {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.35),
+      0 3px 8px -2px rgba(0, 0, 0, 0.3),
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    transition: all 0.15s ease;
+  }
+  .micro-depth:hover {
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.4),
+      0 5px 14px -3px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+    transform: translateY(-0.5px);
+  }
+  .micro-depth:focus {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.35),
+      0 3px 8px -2px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(59, 130, 246, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  }
+  :root.light .micro-depth {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.05),
+      0 3px 8px -2px rgba(0, 0, 0, 0.06),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+  }
+  :root.light .micro-depth:hover {
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.07),
+      0 5px 14px -3px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
+  }
+
+  /* Elevated 3D card — tactile, floating object aesthetic */
   .glass-card {
-    background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: linear-gradient(
+      168deg,
+      rgba(35, 48, 68, 0.95) 0%,
+      rgba(28, 40, 58, 0.97) 50%,
+      rgba(24, 35, 54, 0.98) 100%
+    );
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      /* luminous rim glow — makes card visible on dark bg */
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 0 12px rgba(255, 255, 255, 0.02),
+      /* depth shadows */
+      0 4px 6px -1px rgba(0, 0, 0, 0.4),
+      0 10px 22px -4px rgba(0, 0, 0, 0.5),
+      0 20px 40px -8px rgba(0, 0, 0, 0.35),
+      /* inner highlight — top edge catch light */
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
   }
   :root.light .glass-card {
-    background: linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.6) 100%);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    background: linear-gradient(
+      168deg,
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(248, 250, 252, 0.92) 100%
+    );
+    border: 1px solid rgba(0, 0, 0, 0.07);
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.06),
+      0 10px 22px -4px rgba(0, 0, 0, 0.08),
+      0 20px 40px -8px rgba(0, 0, 0, 0.06),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
   }
 
   /* Subtle glow on hover */
@@ -168,7 +231,32 @@
     transition: box-shadow 0.3s ease;
   }
   .glow-hover:hover {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15), 0 0 0 1px rgba(59, 130, 246, 0.1);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 0 16px rgba(255, 255, 255, 0.03),
+      0 4px 8px -1px rgba(0, 0, 0, 0.45),
+      0 12px 28px -4px rgba(0, 0, 0, 0.55),
+      0 24px 48px -8px rgba(0, 0, 0, 0.4),
+      0 0 24px rgba(59, 130, 246, 0.1),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+  }
+
+  /* Landing page navigation — theme-aware */
+  .landing-nav {
+    background: rgba(15, 23, 42, 0.92);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 8px 24px -6px rgba(0, 0, 0, 0.25),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  }
+  :root.light .landing-nav {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.06);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.06),
+      0 8px 24px -6px rgba(0, 0, 0, 0.05),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.04);
   }
 }
 

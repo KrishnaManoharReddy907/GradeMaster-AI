@@ -34,10 +34,10 @@ export default function Landing() {
       )}
 
       {/* Navigation */}
-      <nav className="border-b border-border">
+      <nav className="landing-nav border-b sticky top-0 z-40 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center micro-depth">
               <GraduationCap className="w-6 h-6 text-white" />
             </div>
             <span className="text-xl font-bold text-text-primary">GradeMaster</span>
@@ -56,7 +56,7 @@ export default function Landing() {
       {/* Hero Section */}
       <section className="max-w-7xl mx-auto px-6 py-20">
         <div className="text-center max-w-3xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8 micro-depth border border-primary/15">
             <Sparkles className="w-4 h-4" />
             AI-Powered Assessment Platform
           </div>
@@ -85,8 +85,8 @@ export default function Landing() {
       {/* Features */}
       <section className="max-w-7xl mx-auto px-6 pb-20">
         <div className="grid md:grid-cols-3 gap-8">
-          <div className="p-8 rounded-2xl bg-surface border border-border">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4">
+          <div className="glass-card p-8 rounded-2xl transition-all duration-300 hover:-translate-y-1" style={{ cursor: 'default' }}>
+            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 micro-depth">
               <Sparkles className="w-6 h-6 text-primary" />
             </div>
             <h3 className="text-xl font-semibold text-text-primary mb-2">AI Evaluation</h3>
@@ -94,8 +94,8 @@ export default function Landing() {
               Automated code analysis with bug detection, plagiarism checking, and intelligent feedback.
             </p>
           </div>
-          <div className="p-8 rounded-2xl bg-surface border border-border">
-            <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center mb-4">
+          <div className="glass-card p-8 rounded-2xl transition-all duration-300 hover:-translate-y-1" style={{ cursor: 'default' }}>
+            <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center mb-4 micro-depth">
               <Shield className="w-6 h-6 text-success" />
             </div>
             <h3 className="text-xl font-semibold text-text-primary mb-2">Secure Sandbox</h3>
@@ -103,8 +103,8 @@ export default function Landing() {
               Code runs in isolated containers with Judge0 for safe, reliable execution across languages.
             </p>
           </div>
-          <div className="p-8 rounded-2xl bg-surface border border-border">
-            <div className="w-12 h-12 rounded-xl bg-warning/10 flex items-center justify-center mb-4">
+          <div className="glass-card p-8 rounded-2xl transition-all duration-300 hover:-translate-y-1" style={{ cursor: 'default' }}>
+            <div className="w-12 h-12 rounded-xl bg-warning/10 flex items-center justify-center mb-4 micro-depth">
               <Zap className="w-6 h-6 text-warning" />
             </div>
             <h3 className="text-xl font-semibold text-text-primary mb-2">Instant Results</h3>

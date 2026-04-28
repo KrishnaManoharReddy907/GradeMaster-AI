@@ -2,13 +2,13 @@ import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 const variants = {
-  primary: 'bg-primary hover:bg-primary-hover text-white shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/30',
-  secondary: 'glass-card hover:bg-white/[0.06] text-text-primary',
-  success: 'bg-success hover:bg-success/90 text-white shadow-sm shadow-success/20',
-  danger: 'bg-error hover:bg-error/90 text-white shadow-sm shadow-error/20',
-  warning: 'bg-warning hover:bg-warning/90 text-white shadow-sm shadow-warning/20',
-  ghost: 'hover:bg-white/[0.04] text-text-primary',
-  outline: 'border border-white/[0.1] hover:bg-white/[0.04] text-text-primary hover:border-white/[0.15]',
+  primary: 'bg-primary hover:bg-primary-hover text-white micro-depth hover:shadow-md hover:shadow-primary/30',
+  secondary: 'glass-card hover:brightness-110 text-text-primary',
+  success: 'bg-success hover:bg-success/90 text-white micro-depth hover:shadow-md hover:shadow-success/20',
+  danger: 'bg-error hover:bg-error/90 text-white micro-depth hover:shadow-md hover:shadow-error/20',
+  warning: 'bg-warning hover:bg-warning/90 text-white micro-depth hover:shadow-md hover:shadow-warning/20',
+  ghost: 'hover:bg-surface-light/50 text-text-primary',
+  outline: 'border border-border hover:bg-surface-light/40 text-text-primary hover:border-border micro-depth',
 }
 
 const sizes = {
