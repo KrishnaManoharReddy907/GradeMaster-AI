@@ -237,11 +237,14 @@ async def _generate_assessment_report_data(assessment_id: str, teacher_id: str) 
     ]
     bottom_performers = [
         {"name": student_name_map.get(sid, "Unknown"), "score": round(pct, 1)}
-        for sid, pct in sorted_students[-5:]
-    ] if len(sorted_students) > 5 else [
-        {"name": student_name_map.get(sid, "Unknown"), "score": round(pct, 1)}
-        for sid, pct in reversed(sorted_students)
-    ]
+        for sid, pct in sorted_students if pct < 60
+    ][:5]
+    # If no one is below 60%, show the lowest scorers (if any scored below average)
+    if not bottom_performers and len(sorted_students) > 1:
+        bottom_performers = [
+            {"name": student_name_map.get(sid, "Unknown"), "score": round(pct, 1)}
+            for sid, pct in sorted_students[-3:] if pct < avg_score
+        ]
 
     common = {
         "total_eligible": eligible_count,
@@ -281,16 +284,16 @@ async def _generate_assessment_report_data(assessment_id: str, teacher_id: str) 
 
 async def _compute_mcq_insights(assessment, mcq_subs):
     """Analyze MCQ submissions — most-missed questions, option distribution."""
-    questions = assessment.get("questions", [])
+    questions = assessment.get("mcq_questions", []) or assessment.get("questions", [])
     if not questions:
         return {}
 
     question_map = {}
     for i, q in enumerate(questions):
-        qid = str(q.get("id", q.get("_id", i + 1)))
+        qid = str(q.get("question_id", q.get("id", q.get("_id", i + 1))))
         question_map[qid] = {
-            "text": q.get("question", q.get("text", f"Question {i+1}")),
-            "correct_answer": q.get("correct_answer", q.get("correctAnswer", "")),
+            "text": q.get("question_text", q.get("question", q.get("text", f"Question {i+1}"))),
+            "correct_answer": q.get("correct_option_id", q.get("correct_answer", q.get("correctAnswer", ""))),
             "options": q.get("options", []),
         }
 
@@ -306,13 +309,24 @@ async def _compute_mcq_insights(assessment, mcq_subs):
         }
 
     for sub in mcq_subs:
-        answers = sub.get("answers", {})
-        for qid, answer in answers.items():
-            if qid in question_stats:
-                question_stats[qid]["total_attempts"] += 1
-                question_stats[qid]["option_counts"][answer] += 1
-                if answer == question_stats[qid]["correct_answer"]:
-                    question_stats[qid]["correct_count"] += 1
+        answers = sub.get("answers", [])
+        # Handle both list format [{question_id, selected_option_id}] and dict format {qid: answer}
+        if isinstance(answers, list):
+            for ans in answers:
+                qid = str(ans.get("question_id", ""))
+                selected = ans.get("selected_option_id", "")
+                if qid in question_stats:
+                    question_stats[qid]["total_attempts"] += 1
+                    question_stats[qid]["option_counts"][selected] += 1
+                    if selected == question_stats[qid]["correct_answer"]:
+                        question_stats[qid]["correct_count"] += 1
+        elif isinstance(answers, dict):
+            for qid, answer in answers.items():
+                if qid in question_stats:
+                    question_stats[qid]["total_attempts"] += 1
+                    question_stats[qid]["option_counts"][answer] += 1
+                    if answer == question_stats[qid]["correct_answer"]:
+                        question_stats[qid]["correct_count"] += 1
 
     # Build question analysis
     question_analysis = []
@@ -387,7 +401,8 @@ async def _compute_coding_insights(assessment, coding_subs):
         lang = s.get("language", "unknown")
         language_counter[lang] += 1
 
-        test_results = s.get("test_results", [])
+        # test_results are stored inside issues.test_results, not at top level
+        test_results = s.get("issues", {}).get("test_results", []) or s.get("test_results", [])
         if test_results:
             passed = sum(1 for t in test_results if t.get("passed"))
             total = len(test_results)
@@ -408,8 +423,8 @@ async def _compute_coding_insights(assessment, coding_subs):
                   for issue, count in common_issues.most_common(5)]
 
     # AI Teaching Recommendation
-    questions = assessment.get("questions", [])
-    question_titles = [q.get("title", q.get("question", f"Problem {i+1}")) for i, q in enumerate(questions)]
+    questions = assessment.get("coding_questions", []) or assessment.get("questions", [])
+    question_titles = [q.get("title", q.get("question", q.get("problem_statement", f"Problem {i+1}")[:50])) for i, q in enumerate(questions)]
 
     prompt = f"""You are an educational advisor analyzing coding assessment results for a programming teacher. Write a comprehensive teaching recommendation.
 

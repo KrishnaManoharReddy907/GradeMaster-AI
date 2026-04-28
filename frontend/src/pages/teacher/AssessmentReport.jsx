@@ -131,20 +131,23 @@ export default function AssessmentReport() {
             )}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleRegenerate}
-          loading={regenerating}
-          title="Re-compute report with latest submission data"
-        >
-          <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
-          Regenerate
-        </Button>
+        {/* Regenerate button — not needed for MCQ-only (auto-evaluated) */}
+        {aType !== 'mcq' && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleRegenerate}
+            loading={regenerating}
+            title="Re-compute report with latest submission data"
+          >
+            <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
+            Regenerate
+          </Button>
+        )}
       </div>
 
-      {/* Warning: unfinalized submissions */}
-      {common.total_all_submissions > common.finalized_count && (
+      {/* Warning: unfinalized submissions — only relevant for non-MCQ types */}
+      {aType !== 'mcq' && common.total_all_submissions > common.finalized_count && (
         <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-center gap-3">
           <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0" />
           <p className="text-sm text-text-primary">

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Code, FileQuestion, Clock, CheckCircle, PenLine } from 'lucide-react'
+import { Code, FileQuestion, Clock, CheckCircle, PenLine, BookOpen } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { studentAPI } from '../../lib/api'
 import Card, { CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../../components/Card'
 import Button from '../../components/Button'
 import { CardSkeleton } from '../../components/Loader'
-import Badge from '../../components/Badge'
 
 export default function Assessments() {
   const navigate = useNavigate()
@@ -90,6 +89,42 @@ export default function Assessments() {
             const aType = assessment.assessment_type || assessment.type || 'mcq'
             const completed = submissionMap[assessment.id] || false
             const duration = assessment.duration_minutes || assessment.duration
+
+            // Parse dates as UTC (backend returns without Z suffix)
+            const parseUTC = (d) => d ? new Date(String(d).endsWith('Z') ? d : d + 'Z') : null
+            const startT = parseUTC(assessment.start_time)
+            const endT = parseUTC(assessment.end_time)
+            const assessmentStatus = assessment.status // from backend: 'upcoming', 'active', 'ended'
+            
+            let cardStatus, badgeText, badgeClass, badgeExtra = ''
+            if (completed) {
+              cardStatus = 'completed'
+              badgeText = 'Completed'
+              badgeClass = 'bg-success/10 text-success border border-success/20'
+            } else if (assessmentStatus === 'ended') {
+              cardStatus = 'ended'
+              badgeText = 'Ended'
+              badgeClass = 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+            } else if (assessmentStatus === 'upcoming') {
+              cardStatus = 'upcoming'
+              badgeText = 'Upcoming'
+              badgeClass = 'bg-primary/10 text-primary border border-primary/20'
+            } else {
+              // Active — check strict vs window for Live/Active distinction
+              const windowMin = (startT && endT) ? Math.round((endT - startT) / 60000) : 999
+              const isStrict = duration && windowMin <= duration
+              if (isStrict) {
+                cardStatus = 'live'
+                badgeText = 'Live'
+                badgeClass = 'bg-error/10 text-error border border-error/30'
+                badgeExtra = 'animate-pulse'
+              } else {
+                cardStatus = 'active'
+                badgeText = 'Active'
+                badgeClass = 'bg-warning/10 text-warning border border-warning/20'
+              }
+            }
+
             return (
               <Card key={assessment.id} className="flex flex-col">
                 <CardHeader>
@@ -105,9 +140,10 @@ export default function Assessments() {
                         <Code className="w-5 h-5 text-success" />
                       )}
                     </div>
-                    <Badge variant={completed ? 'success' : 'warning'}>
-                      {completed ? 'Completed' : 'Pending'}
-                    </Badge>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${badgeClass} ${badgeExtra}`}>
+                      {cardStatus === 'live' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-error mr-1.5 animate-ping" />}
+                      {badgeText}
+                    </span>
                   </div>
                   <CardTitle className="mt-4">{assessment.title}</CardTitle>
                   <CardDescription>
@@ -153,8 +189,6 @@ export default function Assessments() {
                           </span>
                         )
                       }
-                      const startT = assessment.start_time ? new Date(assessment.start_time) : null
-                      const endT = assessment.end_time ? new Date(assessment.end_time) : null
                       if (!startT || !endT || !duration) return null
                       const windowMin = Math.round((endT - startT) / 60000)
                       const isStrict = windowMin <= duration
@@ -175,6 +209,23 @@ export default function Assessments() {
                       )
                     })()}
                   </div>
+
+                  {/* Time info for upcoming/active */}
+                  {cardStatus === 'upcoming' && startT && (
+                    <p className="text-xs text-primary mt-3">
+                      Starts: {startT.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}, {startT.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </p>
+                  )}
+                  {(cardStatus === 'live' || cardStatus === 'active') && endT && (
+                    <p className="text-xs text-warning mt-3">
+                      Ends: {endT.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}, {endT.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </p>
+                  )}
+                  {cardStatus === 'ended' && endT && (
+                    <p className="text-xs text-zinc-400 mt-3">
+                      Ended: {endT.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}, {endT.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </p>
+                  )}
                 </CardContent>
 
                 <CardFooter>
@@ -186,6 +237,26 @@ export default function Assessments() {
                     >
                       <CheckCircle className="w-4 h-4" />
                       View Submission
+                    </Button>
+                  ) : cardStatus === 'ended' ? (
+                    <div className="w-full space-y-2">
+                      <Button variant="ghost" className="w-full" disabled>
+                        Missed
+                      </Button>
+                      {assessment.release_questions_after_deadline && (
+                        <Button
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => navigate(`/student/assessments/${assessment.id}/review-questions`)}
+                        >
+                          <BookOpen className="w-4 h-4" />
+                          View Questions
+                        </Button>
+                      )}
+                    </div>
+                  ) : cardStatus === 'upcoming' ? (
+                    <Button variant="ghost" className="w-full" disabled>
+                      Not Started Yet
                     </Button>
                   ) : (
                     <Button

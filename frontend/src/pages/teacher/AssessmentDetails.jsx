@@ -87,6 +87,21 @@ export default function AssessmentDetails() {
           {assessments.map((assessment) => {
             const aType = assessment.assessment_type || assessment.type || 'mcq'
             const aStats = assessmentStats[assessment.id] || {}
+
+            // Use backend-computed status (timezone-safe)
+            const assessmentStatus = assessment.status
+            let statusText, statusClass
+            if (assessmentStatus === 'ended') {
+              statusText = 'Ended'
+              statusClass = 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+            } else if (assessmentStatus === 'upcoming') {
+              statusText = 'Scheduled'
+              statusClass = 'bg-primary/10 text-primary border border-primary/20'
+            } else {
+              statusText = 'Active'
+              statusClass = 'bg-success/10 text-success border border-success/20'
+            }
+
             return (
               <Card key={assessment.id} className="flex flex-col">
                 <CardHeader>
@@ -102,9 +117,14 @@ export default function AssessmentDetails() {
                         <Code className="w-5 h-5 text-success" />
                       )}
                     </div>
-                    <Badge variant="default">
-                      {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : aType === 'manual' ? 'Manual' : 'Mixed'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="default">
+                        {aType === 'mcq' ? 'MCQ' : aType === 'coding' ? 'Coding' : aType === 'manual' ? 'Manual' : 'Mixed'}
+                      </Badge>
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusClass}`}>
+                        {statusText}
+                      </span>
+                    </div>
                   </div>
                   <CardTitle className="mt-4">{assessment.title}</CardTitle>
                   <CardDescription>
@@ -136,11 +156,7 @@ export default function AssessmentDetails() {
                     View Submissions
                   </Button>
                   {(() => {
-                    // Parse end_time as UTC — backend returns ISO without Z suffix
-                    const et = assessment.end_time
-                    if (!et) return null
-                    const endMs = new Date(et.endsWith('Z') ? et : et + 'Z').getTime()
-                    const isPast = endMs < Date.now()
+                    const isPast = assessmentStatus === 'ended'
 
                     return (
                       <>
@@ -154,7 +170,7 @@ export default function AssessmentDetails() {
                             View Report
                           </Button>
                         )}
-                        {aType !== 'manual' && !isPast && (
+                        {aType !== 'manual' && aType !== 'mcq' && !isPast && (
                           <Button
                             variant="primary"
                             size="md"

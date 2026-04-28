@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, XCircle, Clock, Code, FileQuestion, Bot, User, Shield, Bug, Lightbulb, TestTube, PenLine, Award, MessageSquare } from 'lucide-react'
+import { ArrowLeft, CheckCircle, XCircle, Clock, Code, FileQuestion, Bot, User, Shield, Bug, Lightbulb, TestTube, PenLine, Award, MessageSquare, Info } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
 import { studentAPI } from '../../lib/api'
 import Card from '../../components/Card'
@@ -95,38 +95,167 @@ export default function SubmissionDetails() {
 
       {/* MCQ Results */}
       {submissionStatus.mcq_submitted && (
-        <Card>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <FileQuestion className="w-5 h-5 text-primary" />
+        <div className="space-y-4">
+          <Card>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <FileQuestion className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-text-primary">MCQ Results</h2>
+                <Badge variant="success" className="mt-1">Auto-Evaluated</Badge>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-text-primary">MCQ Results</h2>
-              <Badge variant="success" className="mt-1">Auto-Evaluated</Badge>
+            
+            <div className="grid grid-cols-4 gap-4">
+              <div className="bg-background rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-primary">{submissionStatus.mcq_score ?? '-'}</p>
+                <p className="text-sm text-text-secondary mt-1">Score</p>
+              </div>
+              <div className="bg-background rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-text-primary">{submissionStatus.mcq_total ?? '-'}</p>
+                <p className="text-sm text-text-secondary mt-1">Total Marks</p>
+              </div>
+              <div className="bg-background rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-success">
+                  {submissionStatus.mcq_percentage != null 
+                    ? `${Math.round(submissionStatus.mcq_percentage)}%`
+                    : submissionStatus.mcq_score != null && submissionStatus.mcq_total 
+                      ? `${Math.round((submissionStatus.mcq_score / submissionStatus.mcq_total) * 100)}%`
+                      : '-'}
+                </p>
+                <p className="text-sm text-text-secondary mt-1">Percentage</p>
+              </div>
+              <div className="bg-background rounded-xl p-4 text-center">
+                {(() => {
+                  const results = submissionStatus.mcq_results || []
+                  const correct = results.filter(r => r.is_correct).length
+                  const total = results.length
+                  return (
+                    <>
+                      <p className="text-3xl font-bold text-text-primary">{correct}/{total}</p>
+                      <p className="text-sm text-text-secondary mt-1">Correct</p>
+                    </>
+                  )
+                })()}
+              </div>
             </div>
-          </div>
-          
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-background rounded-xl p-4 text-center">
-              <p className="text-3xl font-bold text-primary">{submissionStatus.mcq_score ?? '-'}</p>
-              <p className="text-sm text-text-secondary mt-1">Score</p>
-            </div>
-            <div className="bg-background rounded-xl p-4 text-center">
-              <p className="text-3xl font-bold text-text-primary">{submissionStatus.mcq_total ?? '-'}</p>
-              <p className="text-sm text-text-secondary mt-1">Total Marks</p>
-            </div>
-            <div className="bg-background rounded-xl p-4 text-center">
-              <p className="text-3xl font-bold text-success">
-                {submissionStatus.mcq_percentage != null 
-                  ? `${Math.round(submissionStatus.mcq_percentage)}%`
-                  : submissionStatus.mcq_score != null && submissionStatus.mcq_total 
-                    ? `${Math.round((submissionStatus.mcq_score / submissionStatus.mcq_total) * 100)}%`
-                    : '-'}
-              </p>
-              <p className="text-sm text-text-secondary mt-1">Percentage</p>
-            </div>
-          </div>
-        </Card>
+          </Card>
+
+          {/* Per-question detailed review */}
+          {submissionStatus.mcq_questions?.length > 0 && (
+            <Card>
+              <h3 className="text-lg font-semibold text-text-primary mb-4">Question-by-Question Review</h3>
+              <div className="space-y-6">
+                {submissionStatus.mcq_questions.map((question, qIndex) => {
+                  const result = (submissionStatus.mcq_results || []).find(
+                    r => r.question_id === question.question_id
+                  )
+                  const isCorrect = result?.is_correct ?? true
+                  const selectedId = result?.selected_option_id
+                  const correctId = question.correct_option_id
+                  const explanation = result?.ai_explanation || ''
+                  const difficulty = question.difficulty || 'medium'
+
+                  return (
+                    <div
+                      key={question.question_id}
+                      className={`p-4 rounded-xl border ${
+                        isCorrect
+                          ? 'border-success/30 bg-success/5'
+                          : 'border-error/30 bg-error/5'
+                      }`}
+                    >
+                      {/* Question header */}
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-start gap-3 flex-1">
+                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
+                            isCorrect ? 'bg-success/20 text-success' : 'bg-error/20 text-error'
+                          }`}>
+                            {qIndex + 1}
+                          </span>
+                          <p className="text-text-primary font-medium leading-relaxed">{question.question_text}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            difficulty === 'easy' ? 'bg-success/10 text-success' :
+                            difficulty === 'hard' ? 'bg-error/10 text-error' :
+                            'bg-warning/10 text-warning'
+                          }`}>
+                            {difficulty}
+                          </span>
+                          <span className="text-xs text-text-secondary">
+                            {result?.marks_obtained ?? 0}/{question.marks || 1}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Options */}
+                      <div className="space-y-2 ml-11">
+                        {question.options?.map((option) => {
+                          const isSelected = option.option_id === selectedId
+                          const isCorrectOption = option.option_id === correctId
+                          
+                          let optionClass = 'border-border bg-background'
+                          let icon = null
+                          
+                          if (isCorrectOption) {
+                            optionClass = 'border-success/50 bg-success/10'
+                            icon = <CheckCircle className="w-4 h-4 text-success shrink-0" />
+                          } else if (isSelected && !isCorrect) {
+                            optionClass = 'border-error/50 bg-error/10'
+                            icon = <XCircle className="w-4 h-4 text-error shrink-0" />
+                          }
+                          
+                          return (
+                            <div
+                              key={option.option_id}
+                              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${optionClass} transition-all`}
+                            >
+                              <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold shrink-0 ${
+                                isCorrectOption ? 'border-success text-success' :
+                                isSelected && !isCorrect ? 'border-error text-error' :
+                                'border-border text-text-secondary'
+                              }`}>
+                                {option.option_id.toUpperCase()}
+                              </span>
+                              <span className={`text-sm flex-1 ${
+                                isCorrectOption ? 'text-success font-medium' :
+                                isSelected && !isCorrect ? 'text-error' :
+                                'text-text-secondary'
+                              }`}>
+                                {option.text}
+                              </span>
+                              {icon}
+                              {isSelected && (
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                  isCorrect ? 'bg-success/20 text-success' : 'bg-error/20 text-error'
+                                }`}>
+                                  Your answer
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* AI Explanation for wrong answers */}
+                      {!isCorrect && explanation && (
+                        <div className="mt-3 ml-11 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                          <p className="text-xs font-semibold text-primary mb-1 flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5" />
+                            AI Explanation
+                          </p>
+                          <p className="text-sm text-text-secondary leading-relaxed">{explanation}</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* Coding Results — Full detail per question */}

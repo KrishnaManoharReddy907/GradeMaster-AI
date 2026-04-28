@@ -78,6 +78,7 @@ async def create_assessment_route(
         end_time=assessment["end_time"],
         teacher_id=assessment["teacher_id"],
         status=assessment["status"],
+        release_questions_after_deadline=assessment.get("release_questions_after_deadline", False),
         created_at=assessment.get("created_at")
     )
 
@@ -101,6 +102,7 @@ async def get_teacher_assessments_route(current_user: dict = Depends(teacher_req
             end_time=a["end_time"],
             teacher_id=a["teacher_id"],
             status=a["status"],
+            release_questions_after_deadline=a.get("release_questions_after_deadline", False),
             created_at=a.get("created_at")
         )
         for a in assessments
@@ -165,7 +167,8 @@ async def get_student_assessments_route(current_user: dict = Depends(student_req
             start_time=a["start_time"],
             end_time=a["end_time"],
             status=a["status"],
-            instructions=a.get("instructions")
+            instructions=a.get("instructions"),
+            release_questions_after_deadline=a.get("release_questions_after_deadline", False)
         )
         for a in assessments
     ]
@@ -250,4 +253,101 @@ async def get_student_assessment_detail_route(
         "manual_questions": safe_manual_questions,
         "coding_config": assessment.get("coding_config"),
         "rules": assessment.get("rules", {}),
+    }
+
+
+@router.get("/student/assessments/{assessment_id}/review-questions")
+async def get_ended_assessment_questions_route(
+    assessment_id: str,
+    current_user: dict = Depends(student_required)
+):
+    """
+    Get full question paper for ended assessments (read-only, for practice).
+    Only available if teacher enabled release_questions_after_deadline.
+    MCQ questions include correct answers since the exam is over.
+    """
+    assessment = await get_assessment_by_id(assessment_id)
+
+    if not assessment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assessment not found"
+        )
+
+    # Check student eligibility
+    student_section_id = current_user.get("section_id")
+    if student_section_id not in assessment.get("section_ids", []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not eligible for this assessment"
+        )
+
+    # Check if teacher allowed question release
+    if not assessment.get("release_questions_after_deadline", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The teacher has not released the question paper for this assessment"
+        )
+
+    # Check if assessment has ended
+    from app.services.assessment_service import make_aware
+    from datetime import datetime, timezone
+    end_time = assessment.get("end_time")
+    if end_time:
+        end_time = make_aware(end_time)
+    now = datetime.now(timezone.utc)
+
+    if not end_time or now < end_time:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Questions can only be viewed after the assessment has ended"
+        )
+
+    # MCQ: include correct answers (exam is over)
+    mcq_questions = []
+    for q in assessment.get("mcq_questions", []):
+        mcq_questions.append({
+            "question_id": q["question_id"],
+            "question_text": q["question_text"],
+            "options": q.get("options", []),
+            "correct_option_id": q.get("correct_option_id"),
+            "marks": q.get("marks", 1),
+            "difficulty": q.get("difficulty", "medium"),
+        })
+
+    # Coding: include full details
+    coding_questions = []
+    for q in assessment.get("coding_questions", []):
+        coding_questions.append({
+            "question_id": q["question_id"],
+            "title": q["title"],
+            "problem_statement": q["problem_statement"],
+            "input_format": q.get("input_format", ""),
+            "output_format": q.get("output_format", ""),
+            "constraints": q.get("constraints", ""),
+            "sample_input": q.get("sample_input", ""),
+            "sample_output": q.get("sample_output", ""),
+            "marks": q.get("marks", 1),
+            "difficulty": q.get("difficulty", "medium"),
+        })
+
+    # Manual: include full question text
+    manual_questions = []
+    for q in assessment.get("manual_questions", []):
+        manual_questions.append({
+            "question_id": q.get("question_id", ""),
+            "question_text": q.get("question_text", ""),
+            "marks": q.get("marks", 1),
+        })
+
+    return {
+        "id": str(assessment["_id"]),
+        "title": assessment["title"],
+        "description": assessment.get("description"),
+        "assessment_type": assessment["assessment_type"],
+        "total_marks": assessment["total_marks"],
+        "duration_minutes": assessment.get("duration_minutes"),
+        "mcq_questions": mcq_questions,
+        "coding_questions": coding_questions,
+        "manual_questions": manual_questions,
     }

@@ -39,11 +39,11 @@ def calculate_assessment_status(start_time: datetime, end_time: datetime) -> str
     end = make_aware(end_time)
 
     if now < start:
-        return "scheduled"
+        return "upcoming"
     elif now >= start and now <= end:
         return "active"
     else:
-        return "completed"
+        return "ended"
 
 
 async def create_assessment(teacher_id: str, data) -> dict:
@@ -123,6 +123,7 @@ async def create_assessment(teacher_id: str, data) -> dict:
         "coding_config": data.coding_config.model_dump() if data.coding_config else None,
         "rules": data.rules.model_dump(),
         "instructions": data.instructions,
+        "release_questions_after_deadline": getattr(data, "release_questions_after_deadline", False) or False,
         "status": calculate_assessment_status(start_time, end_time),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
@@ -211,7 +212,8 @@ async def get_student_assessments(student: dict) -> List[dict]:
             "start_time": assessment["start_time"],
             "end_time": assessment["end_time"],
             "status": status,
-            "instructions": assessment.get("instructions")
+            "instructions": assessment.get("instructions"),
+            "release_questions_after_deadline": assessment.get("release_questions_after_deadline", False)
         }
         result.append(safe_assessment)
 
@@ -228,7 +230,7 @@ async def update_assessment(assessment_id: str, teacher_id: str, data: dict) -> 
     if assessment["teacher_id"] != teacher_id:
         return {"error": "You are not authorized to update this assessment"}
 
-    if assessment["status"] == "completed":
+    if assessment["status"] == "ended":
         return {"error": "Cannot update completed assessment"}
 
     update_data = {k: v for k, v in data.items() if v is not None}

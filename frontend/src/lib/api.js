@@ -237,6 +237,14 @@ export const teacherAPI = {
     return handleResponse(response)
   },
 
+  getMcqSubmissionDetail: async (token, submissionId) => {
+    const response = await fetch(`${BASE_URL}/api/teacher/mcq-submission/${submissionId}`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
   getAssessmentStats: async (token) => {
     const response = await fetch(`${BASE_URL}/api/teacher/assessment-stats`, {
       method: 'GET',
@@ -276,6 +284,14 @@ export const studentAPI = {
 
   getAssessmentDetail: async (token, assessmentId) => {
     const response = await fetch(`${BASE_URL}/api/student/assessments/${assessmentId}`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
+  getReviewQuestions: async (token, assessmentId) => {
+    const response = await fetch(`${BASE_URL}/api/student/assessments/${assessmentId}/review-questions`, {
       method: 'GET',
       headers: getHeaders(token),
     })

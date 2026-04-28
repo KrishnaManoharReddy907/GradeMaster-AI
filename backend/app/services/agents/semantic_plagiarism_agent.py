@@ -205,10 +205,10 @@ async def detect_semantic_plagiarism(db, submission: dict) -> Dict[str, Any]:
         return result
 
     try:
-        # Build query for past evaluated submissions only
+        # Build query for past evaluated/finalized submissions
         query = {
             "assessment_id": assessment_id,
-            "status": "evaluated"
+            "status": {"$in": ["evaluated", "reviewed", "finalized"]}
         }
 
         # Exclude current submission

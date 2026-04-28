@@ -70,10 +70,13 @@ export default function StudentDashboard() {
         }))
         
         setSubmissionMap(statusMap)
+        const pendingCount = allAssessments.filter(a => 
+          a.status === 'active' && !statusMap[a.id]
+        ).length
         setStats({
           totalAssessments: allAssessments.length,
           completed: completedCount,
-          pending: allAssessments.length - completedCount,
+          pending: pendingCount,
           avgScore: scoredCount > 0 ? Math.round(totalScore / scoredCount) : 0,
         })
       } catch (error) {
@@ -150,20 +153,32 @@ export default function StudentDashboard() {
                 const aType = assessment.assessment_type || assessment.type || 'mcq'
                 const completed = submissionMap[assessment.id] || false
                 const status = assessment.status
+                const duration = assessment.duration_minutes || assessment.duration
+                const startT = assessment.start_time ? new Date(assessment.start_time) : null
+                const endT = assessment.end_time ? new Date(assessment.end_time) : null
                 
-                let badgeText, badgeClass
+                let badgeText, badgeClass, isLive = false
                 if (completed) {
                   badgeText = 'Completed'
                   badgeClass = 'bg-success/10 text-success'
                 } else if (status === 'ended') {
                   badgeText = 'Missed'
-                  badgeClass = 'bg-error/10 text-error'
+                  badgeClass = 'bg-zinc-500/10 text-zinc-400'
                 } else if (status === 'upcoming') {
                   badgeText = 'Upcoming'
                   badgeClass = 'bg-primary/10 text-primary'
                 } else {
-                  badgeText = 'Pending'
-                  badgeClass = 'bg-warning/10 text-warning'
+                  // Active — check strict vs window
+                  const windowMin = (startT && endT) ? Math.round((endT - startT) / 60000) : 999
+                  const isStrict = duration && windowMin <= duration
+                  if (isStrict) {
+                    badgeText = 'Live'
+                    badgeClass = 'bg-error/10 text-error'
+                    isLive = true
+                  } else {
+                    badgeText = 'Active'
+                    badgeClass = 'bg-warning/10 text-warning'
+                  }
                 }
                 return (
                   <Link
@@ -178,7 +193,8 @@ export default function StudentDashboard() {
                           {aType === 'mcq' ? 'MCQ Assessment' : aType === 'coding' ? 'Coding Assessment' : aType === 'manual' ? 'Handwritten Assignment' : 'Mixed Assessment'}
                         </p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${badgeClass}`}>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${badgeClass} ${isLive ? 'animate-pulse' : ''}`}>
+                        {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-error mr-1.5 animate-ping" />}
                         {badgeText}
                       </span>
                     </div>

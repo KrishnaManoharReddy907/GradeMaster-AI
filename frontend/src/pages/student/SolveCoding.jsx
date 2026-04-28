@@ -125,11 +125,18 @@ export default function SolveCoding() {
   const navigate = useNavigate()
   const { token, addToast } = useApp()
   
+  const STORAGE_PREFIX = `coding_exam_${id}_`
+
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [submittingMessage, setSubmittingMessage] = useState('')
   const [assessment, setAssessment] = useState(null)
-  const [language, setLanguage] = useState('python')
-  const [code, setCode] = useState(DEFAULT_CODE.python)
+  const [language, setLanguage] = useState(() => {
+    return localStorage.getItem(STORAGE_PREFIX + 'language') || 'python'
+  })
+  const [code, setCode] = useState(() => {
+    return localStorage.getItem(STORAGE_PREFIX + 'code') || DEFAULT_CODE.python
+  })
   const [codeWarnings, setCodeWarnings] = useState([])
   const [timeLeft, setTimeLeft] = useState(null)
   const timerRef = useRef(null)
@@ -141,12 +148,26 @@ export default function SolveCoding() {
         const data = await studentAPI.getAssessmentDetail(token, id)
         setAssessment(data)
 
-        // Initialize timer
+        // Restore timer from localStorage or initialize fresh
         const duration = data.duration_minutes || data.duration
         if (duration) {
-          setTimeLeft(duration * 60)
+          const savedDeadline = localStorage.getItem(STORAGE_PREFIX + 'deadline')
+          if (savedDeadline) {
+            const remaining = Math.max(0, Math.floor((parseInt(savedDeadline) - Date.now()) / 1000))
+            setTimeLeft(remaining)
+          } else {
+            const totalSeconds = duration * 60
+            setTimeLeft(totalSeconds)
+            localStorage.setItem(STORAGE_PREFIX + 'deadline', String(Date.now() + totalSeconds * 1000))
+          }
           startTimeRef.current = Date.now()
         }
+
+        // Restore saved code/language if present
+        const savedCode = localStorage.getItem(STORAGE_PREFIX + 'code')
+        const savedLang = localStorage.getItem(STORAGE_PREFIX + 'language')
+        if (savedCode) setCode(savedCode)
+        if (savedLang) setLanguage(savedLang)
       } catch (error) {
         console.error('Failed to fetch assessment:', error)
         addToast(error.message || 'Failed to load assessment', 'error')
@@ -210,10 +231,33 @@ export default function SolveCoding() {
     setCodeWarnings(warnings)
   }, [code, language])
 
+  // Persist code to localStorage on change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_PREFIX + 'code', code)
+  }, [code])
+
+  // Persist language to localStorage on change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_PREFIX + 'language', language)
+  }, [language])
+
   const handleLanguageChange = (e) => {
     const newLang = e.target.value
     setLanguage(newLang)
-    setCode(DEFAULT_CODE[newLang])
+    // Only reset to template if no saved code for this language
+    const savedCode = localStorage.getItem(STORAGE_PREFIX + 'code')
+    if (!savedCode || savedCode === DEFAULT_CODE[language]) {
+      setCode(DEFAULT_CODE[newLang])
+    } else {
+      // Ask before overwriting custom code
+      const proceed = window.confirm('Switching language will reset your code. Continue?')
+      if (proceed) {
+        setCode(DEFAULT_CODE[newLang])
+      } else {
+        // Revert language change
+        return
+      }
+    }
   }
 
   const handleSubmit = async () => {
@@ -231,25 +275,37 @@ export default function SolveCoding() {
     }
 
     setSubmitting(true)
+    setSubmittingMessage('Submitting your code...')
     try {
       const codingQuestions = assessment.coding_questions || assessment.questions || []
       const questionId = codingQuestions.length > 0 
         ? (codingQuestions[0].question_id || codingQuestions[0].id || 'default')
         : 'default'
 
+      setSubmittingMessage('Sending code to server...')
       await studentAPI.submitCoding(token, {
         assessment_id: id,
         question_id: questionId,
         code,
         language,
       })
+
+      // Clear localStorage on successful submit
+      localStorage.removeItem(STORAGE_PREFIX + 'code')
+      localStorage.removeItem(STORAGE_PREFIX + 'language')
+      localStorage.removeItem(STORAGE_PREFIX + 'deadline')
+
+      setSubmittingMessage('Submitted successfully! ✓')
       addToast('Code submitted successfully!', 'success')
+      // Brief pause so user sees the success state on the overlay
+      await new Promise(resolve => setTimeout(resolve, 1500))
       navigate('/student/submissions')
     } catch (error) {
       console.error('Failed to submit code:', error)
       addToast(error.message || 'Failed to submit code', 'error')
     } finally {
       setSubmitting(false)
+      setSubmittingMessage('')
     }
   }
 
@@ -268,6 +324,35 @@ export default function SolveCoding() {
 
   return (
     <div className="space-y-6">
+      {/* Custom scrollbar styles */}
+      <style>{`
+        .coding-scroll::-webkit-scrollbar { width: 6px; }
+        .coding-scroll::-webkit-scrollbar-track { background: transparent; }
+        .coding-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+        .coding-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+        .coding-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+      `}</style>
+      {/* ── Submission Overlay ── */}
+      {submitting && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)'
+        }}>
+          <div style={{
+            width: 56, height: 56, border: '4px solid rgba(255,255,255,0.15)',
+            borderTopColor: '#6366f1', borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite', marginBottom: 24
+          }} />
+          <p style={{ color: '#fff', fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
+            {submittingMessage || 'Submitting...'}
+          </p>
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>
+            Please wait — do not close this page
+          </p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => navigate('/student/assessments')}>
@@ -290,9 +375,10 @@ export default function SolveCoding() {
         )}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Problem Description */}
-        <Card className="lg:sticky lg:top-6 lg:self-start">
+      <div className="grid lg:grid-cols-2 gap-6" style={{ height: 'calc(100vh - 140px)' }}>
+        {/* Problem Description — independent scroll */}
+        <div className="overflow-y-auto coding-scroll pr-3" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+        <Card>
           <h2 className="text-lg font-semibold text-text-primary mb-4">
             {currentProblem?.title || 'Problem Description'}
           </h2>
@@ -375,27 +461,35 @@ export default function SolveCoding() {
             </div>
           </div>
         </Card>
+        </div>
 
-        {/* Code Editor */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Select
-              value={language}
-              onChange={handleLanguageChange}
-              className="w-40"
-            >
-              {LANGUAGES.map(lang => (
-                <option key={lang.value} value={lang.value}>
-                  {lang.label}
-                </option>
-              ))}
-            </Select>
-            
-            <Button onClick={handleSubmit} loading={submitting}>
+        {/* Code Editor — independent scroll */}
+        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+          {/* Sticky toolbar — stays fixed at top */}
+          <div className="flex items-center justify-between px-1 py-2 mb-3 border-b border-border/50 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <Select
+                value={language}
+                onChange={handleLanguageChange}
+                className="w-44"
+              >
+                {LANGUAGES.map(lang => (
+                  <option key={lang.value} value={lang.value}>
+                    {lang.label}
+                  </option>
+                ))}
+              </Select>
+              <span className="text-xs text-text-secondary hidden md:inline">v{language === 'python' ? '3.x' : language === 'java' ? '17' : language === 'cpp' ? '17' : language === 'c' ? '11' : 'ES6'}</span>
+            </div>
+            <Button onClick={handleSubmit} loading={submitting} className="px-6">
               <Send className="w-4 h-4" />
-              Submit
+              Submit Code
             </Button>
           </div>
+
+          {/* Scrollable content area */}
+          <div className="overflow-y-auto coding-scroll pr-3 flex-1">
+          <div className="space-y-4">
 
           {/* Helper text */}
           <div className="flex items-center gap-2 px-3 py-2 bg-background rounded-lg">
@@ -447,6 +541,8 @@ print(n * n)`}
               <p className="text-xs text-error/70 mt-1">System won't call this</p>
             </div>
           </div>
+        </div>
+        </div>
         </div>
       </div>
     </div>

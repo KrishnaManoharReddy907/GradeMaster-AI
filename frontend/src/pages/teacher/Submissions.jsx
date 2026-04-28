@@ -102,7 +102,7 @@ export default function Submissions() {
             {submissions.length} submission{submissions.length !== 1 ? 's' : ''}
           </p>
         </div>
-        {assessment?.assessment_type !== 'manual' && (
+        {assessment?.assessment_type !== 'manual' && assessment?.assessment_type !== 'mcq' && (
           <Button onClick={handleBatchEvaluate} loading={evaluating.batch}>
             <Bot className="w-5 h-5" />
             Evaluate All with AI
@@ -179,7 +179,19 @@ export default function Submissions() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {status === 'pending' && submission.type !== 'manual' && (
+                        {/* MCQ: read-only view only */}
+                        {submission.type === 'mcq' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/teacher/submissions/${submission.id}/mcq-details`)}
+                          >
+                            <Eye className="w-4 h-4" />
+                            View Details
+                          </Button>
+                        )}
+                        {/* Coding: evaluate + review flow */}
+                        {submission.type !== 'mcq' && submission.type !== 'manual' && status === 'pending' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -190,7 +202,7 @@ export default function Submissions() {
                             <Play className="w-4 h-4" />
                           </Button>
                         )}
-                        {(status === 'evaluated' || status === 'pending') && submission.type !== 'manual' && (
+                        {(status === 'evaluated' || status === 'pending') && submission.type !== 'manual' && submission.type !== 'mcq' && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -221,7 +233,7 @@ export default function Submissions() {
                             View Details
                           </Button>
                         )}
-                        {submission.type !== 'manual' && (status === 'reviewed' || status === 'finalized') && (
+                        {submission.type !== 'manual' && submission.type !== 'mcq' && (status === 'reviewed' || status === 'finalized') && (
                           <Button
                             variant="ghost"
                             size="sm"

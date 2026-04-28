@@ -18,6 +18,7 @@ import SolveManual from './pages/student/SolveManual'
 import SubmissionStatus from './pages/student/SubmissionStatus'
 import StudentSubmissionDetails from './pages/student/SubmissionDetails'
 import StudentAnalytics from './pages/student/Analytics'
+import QuestionReview from './pages/student/QuestionReview'
 
 // Teacher pages
 import TeacherDashboard from './pages/teacher/TeacherDashboard'
@@ -30,6 +31,7 @@ import ReviewHistory from './pages/teacher/ReviewHistory'
 import ManualReview from './pages/teacher/ManualReview'
 import TeacherAnalytics from './pages/teacher/Analytics'
 import AssessmentReport from './pages/teacher/AssessmentReport'
+import MCQDetails from './pages/teacher/MCQDetails'
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard'
@@ -109,6 +111,7 @@ export default function App() {
           <Route path="assessments/:id/manual" element={<SolveManual />} />
           <Route path="submissions" element={<SubmissionStatus />} />
           <Route path="submissions/:id" element={<StudentSubmissionDetails />} />
+          <Route path="assessments/:id/review-questions" element={<QuestionReview />} />
           <Route path="analytics" element={<StudentAnalytics />} />
         </Route>
 
@@ -125,6 +128,7 @@ export default function App() {
           <Route path="submissions/:id/evaluate" element={<EvaluateSubmission />} />
           <Route path="submissions/:id/review" element={<ReviewSubmission />} />
           <Route path="submissions/:id/history" element={<ReviewHistory />} />
+          <Route path="submissions/:id/mcq-details" element={<MCQDetails />} />
           <Route path="manual-submissions/:id/review" element={<ManualReview />} />
           <Route path="assessments/:id/report" element={<AssessmentReport />} />
           <Route path="analytics" element={<TeacherAnalytics />} />

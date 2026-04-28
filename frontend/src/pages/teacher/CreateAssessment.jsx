@@ -23,6 +23,7 @@ export default function CreateAssessment() {
     start_time: '',
     end_time: '',
     instructions: '',
+    release_questions_after_deadline: false,
   })
   const [mcqQuestions, setMcqQuestions] = useState([])
   const [codingQuestions, setCodingQuestions] = useState([])
@@ -243,6 +244,7 @@ export default function CreateAssessment() {
         start_time: form.assessment_type === 'manual' ? null : new Date(form.start_time).toISOString(),
         end_time: new Date(form.end_time).toISOString(),
         instructions: form.instructions || null,
+        release_questions_after_deadline: form.release_questions_after_deadline,
         mcq_questions: form.assessment_type === 'mcq' || form.assessment_type === 'mixed' ? mcqQuestions : [],
         coding_questions: form.assessment_type === 'coding' || form.assessment_type === 'mixed' ? codingQuestions : [],
         manual_questions: form.assessment_type === 'manual' ? manualQuestions : [],
@@ -445,6 +447,25 @@ export default function CreateAssessment() {
               onChange={(e) => setForm({ ...form, instructions: e.target.value })}
               rows={2}
             />
+
+            {/* Release questions toggle */}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-background border border-border">
+              <div>
+                <p className="text-sm font-medium text-text-primary">Release questions after deadline</p>
+                <p className="text-xs text-text-secondary mt-0.5">Students can view the question paper for practice after the assessment ends</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, release_questions_after_deadline: !form.release_questions_after_deadline })}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  form.release_questions_after_deadline ? 'bg-primary' : 'bg-border'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                  form.release_questions_after_deadline ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
           </div>
         </Card>
 

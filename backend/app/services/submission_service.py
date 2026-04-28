@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from bson import ObjectId
+import os
 
 from app.database import get_database
 from app.services.assessment_service import get_assessment_by_id, make_aware
@@ -139,6 +140,87 @@ def calculate_mcq_score(answers: List, mcq_questions: List[dict]) -> dict:
     }
 
 
+async def _generate_mcq_explanations(results: list, mcq_questions: list) -> list:
+    """Generate AI explanations for wrong MCQ answers using Gemini."""
+    wrong_results = [r for r in results if not r["is_correct"]]
+    if not wrong_results:
+        return results
+
+    question_map = {q["question_id"]: q for q in mcq_questions}
+
+    # Build prompt for all wrong answers at once (single API call)
+    wrong_items = []
+    for r in wrong_results:
+        q = question_map.get(r["question_id"], {})
+        options = q.get("options", [])
+        option_text = {opt["option_id"]: opt.get("text", "") for opt in options}
+        wrong_items.append({
+            "question_id": r["question_id"],
+            "question_text": q.get("question_text", "Unknown"),
+            "selected": option_text.get(r["selected_option_id"], r["selected_option_id"]),
+            "correct": option_text.get(r["correct_option_id"], r["correct_option_id"]),
+        })
+
+    prompt_items = "\n".join(
+        f"Q{i+1} ({item['question_id']}): \"{item['question_text']}\"\n"
+        f"  Student chose: \"{item['selected']}\"\n"
+        f"  Correct answer: \"{item['correct']}\""
+        for i, item in enumerate(wrong_items)
+    )
+
+    prompt = f"""You are an educational assistant. For each wrong MCQ answer below, write a brief explanation (1-2 sentences) that:
+- Explains WHY the correct answer is right
+- Explains WHY the student's choice was wrong (if applicable)
+- Is educational and helpful, not condescending
+
+{prompt_items}
+
+Return your response in this exact format, one per line:
+QID: explanation
+
+Example:
+q1: The correct answer is X because... Your choice Y is incorrect because...
+
+Use the exact question_id values shown in parentheses above (like q1, q2, etc)."""
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"max_output_tokens": 2048, "temperature": 0.3}
+        )
+
+        text = response.text.strip()
+        # Parse "qid: explanation" lines
+        explanations = {}
+        for line in text.split("\n"):
+            line = line.strip()
+            if ":" in line:
+                parts = line.split(":", 1)
+                qid = parts[0].strip().lower()
+                explanation = parts[1].strip()
+                if explanation:
+                    explanations[qid] = explanation
+
+        # Attach explanations to results
+        for r in results:
+            if not r["is_correct"]:
+                qid = r["question_id"].lower()
+                r["ai_explanation"] = explanations.get(qid, "")
+            else:
+                r["ai_explanation"] = ""
+
+    except Exception as e:
+        print(f"MCQ AI explanation failed: {e}")
+        # Fallback: no explanations
+        for r in results:
+            r["ai_explanation"] = ""
+
+    return results
+
+
 async def submit_mcq(student: dict, data) -> dict:
     """Submit MCQ answers for an assessment."""
     db = get_database()
@@ -170,6 +252,11 @@ async def submit_mcq(student: dict, data) -> dict:
         return answer_validation
 
     score_result = calculate_mcq_score(data.answers, mcq_questions)
+
+    # Generate AI explanations for wrong answers
+    score_result["results"] = await _generate_mcq_explanations(
+        score_result["results"], mcq_questions
+    )
 
     submission_dict = {
         "assessment_id": data.assessment_id,
@@ -272,12 +359,53 @@ async def get_student_submission_status(student_id: str, assessment_id: str) -> 
         "assessment_id": assessment_id
     })
 
+    # Fetch assessment for MCQ question details
+    mcq_questions_data = []
+    mcq_results = []
+    if mcq_submission:
+        assessment = await get_assessment_by_id(assessment_id)
+        if assessment:
+            mcq_questions_raw = assessment.get("mcq_questions", [])
+            for q in mcq_questions_raw:
+                mcq_questions_data.append({
+                    "question_id": q.get("question_id"),
+                    "question_text": q.get("question_text", ""),
+                    "options": q.get("options", []),
+                    "correct_option_id": q.get("correct_option_id"),
+                    "marks": q.get("marks", 1),
+                    "difficulty": q.get("difficulty", "medium"),
+                })
+
+            mcq_results = mcq_submission.get("results", [])
+
+            # Check if AI explanations are missing for wrong answers (old submissions)
+            has_wrong = any(not r.get("is_correct") for r in mcq_results)
+            has_explanations = any(r.get("ai_explanation") for r in mcq_results)
+
+            if has_wrong and not has_explanations:
+                # Regenerate explanations for old submissions
+                try:
+                    mcq_results = await _generate_mcq_explanations(
+                        mcq_results, mcq_questions_raw
+                    )
+                    # Update DB so we don't regenerate again
+                    await db.mcq_submissions.update_one(
+                        {"_id": mcq_submission["_id"]},
+                        {"$set": {"results": mcq_results}}
+                    )
+                except Exception as e:
+                    print(f"Failed to regenerate MCQ explanations: {e}")
+        else:
+            mcq_results = mcq_submission.get("results", [])
+    
     return {
         "assessment_id": assessment_id,
         "mcq_submitted": mcq_submission is not None,
         "mcq_score": mcq_submission.get("score") if mcq_submission else None,
         "mcq_total": mcq_submission.get("total_marks") if mcq_submission else None,
         "mcq_percentage": mcq_submission.get("percentage") if mcq_submission else None,
+        "mcq_results": mcq_results,
+        "mcq_questions": mcq_questions_data,
         "coding_submitted": len(coding_submissions) > 0,
         "coding_submissions": [
             {

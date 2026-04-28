@@ -235,27 +235,28 @@ async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
     else:
         result_status = "wrong"
     
-    # Calculate accuracy score (0-100) based on multiple factors:
-    # 1. Test pass ratio (70% weight) — primary factor
-    # 2. Code quality from AST (20% weight) — structure & readability
-    # 3. Execution success (10% weight) — no runtime errors
-    test_score = test_pass_ratio * 70
-    
-    # Code quality score from AST analysis
-    quality_score = 0
-    if ast_analysis:
-        has_functions = ast_analysis.get("functions", 0) > 0
-        low_nesting = ast_analysis.get("nesting_depth", 10) <= 3
-        has_returns = ast_analysis.get("returns", 0) > 0
-        quality_score += 7 if has_functions else 0
-        quality_score += 7 if low_nesting else 3
-        quality_score += 6 if has_returns else 0
-    
-    # Execution quality — did all tests at least run without crashing?
-    runtime_errors = sum(1 for tr in test_results if tr.get("stderr"))
-    exec_score = 10 if runtime_errors == 0 else max(0, 10 - runtime_errors * 2)
-    
-    accuracy_score = round(min(test_score + quality_score + exec_score, 100))
+    # Calculate accuracy score (0-100)
+    # If all tests pass → 100% (student solved it correctly, code style is irrelevant)
+    # If partial/failed → weighted formula based on test pass rate + code quality + execution
+    if passed_tests == total_tests:
+        accuracy_score = 100
+    else:
+        # Test pass ratio is the dominant factor (80% weight)
+        test_score = test_pass_ratio * 80
+        
+        # Code quality from AST analysis (10% weight)
+        quality_score = 0
+        if ast_analysis:
+            low_nesting = ast_analysis.get("nesting_depth", 10) <= 4
+            reasonable_complexity = ast_analysis.get("complexity", "unknown") != "high"
+            quality_score += 5 if low_nesting else 2
+            quality_score += 5 if reasonable_complexity else 0
+        
+        # Execution quality — did tests run without crashing? (10% weight)
+        runtime_errors = sum(1 for tr in test_results if tr.get("stderr"))
+        exec_score = 10 if runtime_errors == 0 else max(0, 10 - runtime_errors * 2)
+        
+        accuracy_score = round(min(test_score + quality_score + exec_score, 100))
 
     # Build structured response
     result_summary = {
@@ -344,11 +345,12 @@ async def batch_evaluate_assessment(assessment_id: str, evaluator_id: str) -> di
             })
         else:
             evaluated += 1
+            summary = result.get("result_summary", {})
             results.append({
                 "submission_id": str(submission["_id"]),
-                "score": result["score"],
-                "passed_tests": result["passed_tests"],
-                "total_tests": result["total_tests"]
+                "score": summary.get("ai_score"),
+                "passed_tests": summary.get("passed"),
+                "total_tests": summary.get("total")
             })
 
     return {

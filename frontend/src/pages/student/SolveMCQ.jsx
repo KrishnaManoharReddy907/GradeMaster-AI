@@ -26,7 +26,22 @@ export default function SolveMCQ() {
   const [showPalette, setShowPalette] = useState(true) // mobile toggle
   const [timeLeft, setTimeLeft] = useState(null) // seconds
   const timerRef = useRef(null)
-  const startTimeRef = useRef(null)
+  const deadlineRef = useRef(null) // absolute deadline timestamp (ms)
+  const stateLoaded = useRef(false) // track if we've restored from storage
+
+  const STORAGE_KEY = `mcq_state_${id}`
+  const TIMER_KEY = `mcq_start_${id}`
+
+  // Save exam state to localStorage on every change
+  useEffect(() => {
+    if (!stateLoaded.current) return // don't save until we've loaded first
+    const state = {
+      answers,
+      questionStates,
+      currentQuestion,
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  }, [answers, questionStates, currentQuestion, STORAGE_KEY])
 
   // Fetch assessment
   useEffect(() => {
@@ -35,20 +50,52 @@ export default function SolveMCQ() {
         const data = await studentAPI.getAssessmentDetail(token, id)
         setAssessment(data)
 
-        // Initialize all questions as not-visited, mark first as visited
         const questions = data.mcq_questions || data.questions || []
-        const states = {}
-        questions.forEach((q, i) => {
-          const qId = q.question_id || String(i)
-          states[qId] = i === 0 ? Q_VISITED : Q_NOT_VISITED
-        })
-        setQuestionStates(states)
 
-        // Initialize timer
+        // Try to restore saved state from localStorage
+        const savedState = localStorage.getItem(STORAGE_KEY)
+        if (savedState) {
+          try {
+            const parsed = JSON.parse(savedState)
+            if (parsed.answers) setAnswers(parsed.answers)
+            if (parsed.questionStates) setQuestionStates(parsed.questionStates)
+            if (typeof parsed.currentQuestion === 'number') setCurrentQuestion(parsed.currentQuestion)
+            stateLoaded.current = true
+          } catch {
+            // Corrupted — initialize fresh
+            stateLoaded.current = true
+          }
+        }
+
+        // If no saved state, initialize fresh
+        if (!savedState) {
+          const states = {}
+          questions.forEach((q, i) => {
+            const qId = q.question_id || String(i)
+            states[qId] = i === 0 ? Q_VISITED : Q_NOT_VISITED
+          })
+          setQuestionStates(states)
+          stateLoaded.current = true
+        }
+
+        // Initialize timer with localStorage persistence
         const duration = data.duration_minutes || data.duration
         if (duration) {
-          setTimeLeft(duration * 60)
-          startTimeRef.current = Date.now()
+          let startTime = localStorage.getItem(TIMER_KEY)
+
+          if (!startTime) {
+            // First time starting this exam — record start time
+            startTime = Date.now()
+            localStorage.setItem(TIMER_KEY, String(startTime))
+          } else {
+            startTime = parseInt(startTime, 10)
+          }
+
+          // Compute deadline and remaining time
+          const deadline = startTime + duration * 60 * 1000
+          deadlineRef.current = deadline
+          const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000))
+          setTimeLeft(remaining)
         }
       } catch (error) {
         console.error('Failed to fetch assessment:', error)
@@ -61,18 +108,23 @@ export default function SolveMCQ() {
     fetchAssessment()
   }, [id, token, addToast, navigate])
 
-  // Timer countdown
+  // Timer countdown — recomputes from deadline every second (drift-proof)
   useEffect(() => {
     if (timeLeft === null || timeLeft <= 0) return
 
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current)
-          return 0
-        }
-        return prev - 1
-      })
+      if (deadlineRef.current) {
+        const remaining = Math.max(0, Math.round((deadlineRef.current - Date.now()) / 1000))
+        setTimeLeft(remaining)
+      } else {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current)
+            return 0
+          }
+          return prev - 1
+        })
+      }
     }, 1000)
 
     return () => clearInterval(timerRef.current)
@@ -141,9 +193,15 @@ export default function SolveMCQ() {
 
   const handleMarkForReview = () => {
     const qId = getQuestionId(currentQuestion)
-    setQuestionStates(prev => ({ ...prev, [qId]: Q_REVIEW }))
-    if (currentQuestion < totalQuestions - 1) {
-      goToQuestion(currentQuestion + 1)
+    if (questionStates[qId] === Q_REVIEW) {
+      // Unmark — restore to answered or visited
+      setQuestionStates(prev => ({ ...prev, [qId]: answers[qId] ? Q_ANSWERED : Q_VISITED }))
+    } else {
+      // Mark for review and go next
+      setQuestionStates(prev => ({ ...prev, [qId]: Q_REVIEW }))
+      if (currentQuestion < totalQuestions - 1) {
+        goToQuestion(currentQuestion + 1)
+      }
     }
   }
 
@@ -167,6 +225,9 @@ export default function SolveMCQ() {
         assessment_id: id,
         answers: answersPayload,
       })
+      // Clean up all exam state from localStorage
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(TIMER_KEY)
       addToast('Assessment submitted successfully!', 'success')
       navigate('/student/submissions')
     } catch (error) {
@@ -197,6 +258,29 @@ export default function SolveMCQ() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader size="lg" />
+      </div>
+    )
+  }
+
+  if (submitting) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-background/95 backdrop-blur-sm flex items-center justify-center">
+        <div className="text-center space-y-6 max-w-sm px-6">
+          {/* Animated spinner */}
+          <div className="relative w-20 h-20 mx-auto">
+            <div className="absolute inset-0 rounded-full border-4 border-surface-light"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary animate-spin"></div>
+            <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-secondary animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-text-primary mb-2">Submitting Your Answers</h2>
+            <p className="text-text-secondary text-sm">Please wait while we evaluate your responses...</p>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-xs text-text-secondary">
+            <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+            <span>AI is grading your answers</span>
+          </div>
+        </div>
       </div>
     )
   }
@@ -291,9 +375,13 @@ export default function SolveMCQ() {
                 Question {currentQuestion + 1} of {totalQuestions}
               </span>
               {questionStates[currentQId] === Q_REVIEW && (
-                <span className="flex items-center gap-1.5 text-xs font-medium text-purple-400 bg-purple-500/10 px-3 py-1 rounded-full">
-                  <Bookmark className="w-3 h-3" /> Marked for Review
-                </span>
+                <button
+                  onClick={handleMarkForReview}
+                  className="flex items-center gap-1.5 text-xs font-medium text-purple-400 bg-purple-500/10 px-3 py-1 rounded-full hover:bg-purple-500/20 transition-colors cursor-pointer"
+                  title="Click to unmark"
+                >
+                  <Bookmark className="w-3 h-3 fill-purple-400" /> Marked for Review ✕
+                </button>
               )}
             </div>
             {/* Progress bar */}
@@ -379,11 +467,19 @@ export default function SolveMCQ() {
                 {/* Mark for Review & Next */}
                 <button
                   onClick={handleMarkForReview}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors"
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                    questionStates[currentQId] === Q_REVIEW
+                      ? 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/10'
+                      : 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
+                  }`}
                 >
-                  <Bookmark className="w-4 h-4" />
-                  <span className="hidden sm:inline">Mark for Review</span>
-                  <span className="sm:hidden">Review</span>
+                  <Bookmark className={`w-4 h-4 ${questionStates[currentQId] === Q_REVIEW ? 'fill-purple-400' : ''}`} />
+                  <span className="hidden sm:inline">
+                    {questionStates[currentQId] === Q_REVIEW ? 'Unmark Review' : 'Mark for Review'}
+                  </span>
+                  <span className="sm:hidden">
+                    {questionStates[currentQId] === Q_REVIEW ? 'Unmark' : 'Review'}
+                  </span>
                 </button>
 
                 {/* Save & Next */}

@@ -94,6 +94,7 @@ class AssessmentCreate(BaseModel):
     coding_config: Optional[CodingConfigSchema] = None
     rules: RulesSchema = RulesSchema()
     instructions: Optional[str] = None
+    release_questions_after_deadline: Optional[bool] = False
 
 
 class AssessmentResponse(BaseModel):
@@ -109,6 +110,7 @@ class AssessmentResponse(BaseModel):
     end_time: datetime
     teacher_id: str
     status: str
+    release_questions_after_deadline: Optional[bool] = False
     created_at: Optional[datetime] = None
 
 
@@ -131,6 +133,7 @@ class AssessmentDetailResponse(BaseModel):
     rules: dict
     instructions: Optional[str] = None
     status: str
+    release_questions_after_deadline: Optional[bool] = False
     created_at: Optional[datetime] = None
 
 
@@ -146,3 +149,4 @@ class StudentAssessmentResponse(BaseModel):
     end_time: datetime
     status: str
     instructions: Optional[str] = None
+    release_questions_after_deadline: Optional[bool] = False

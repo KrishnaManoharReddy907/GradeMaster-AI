@@ -345,6 +345,63 @@ async def get_student_submission_detail_route(
     return result
 
 
+@router.get("/teacher/mcq-submission/{submission_id}")
+async def get_mcq_submission_detail(
+    submission_id: str,
+    current_user: dict = Depends(teacher_or_admin_required)
+):
+    """Get full MCQ submission details for teacher (read-only view)."""
+    from app.database import get_database
+    from app.services.assessment_service import get_assessment_by_id
+    from bson import ObjectId
+    db = get_database()
+
+    try:
+        sub = await db.mcq_submissions.find_one({"_id": ObjectId(submission_id)})
+    except Exception as e:
+        print(f"MCQ submission lookup error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid submission ID")
+
+    if not sub:
+        raise HTTPException(status_code=404, detail="MCQ submission not found")
+
+    # Get student info
+    student = None
+    try:
+        student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
+    except Exception:
+        pass
+
+    # Get assessment for question details
+    assessment = await get_assessment_by_id(sub["assessment_id"])
+    mcq_questions = []
+    if assessment:
+        for q in assessment.get("mcq_questions", []):
+            mcq_questions.append({
+                "question_id": q.get("question_id"),
+                "question_text": q.get("question_text", ""),
+                "options": q.get("options", []),
+                "correct_option_id": q.get("correct_option_id"),
+                "marks": q.get("marks", 1),
+                "difficulty": q.get("difficulty", "medium"),
+            })
+
+    return {
+        "id": str(sub["_id"]),
+        "assessment_id": sub["assessment_id"],
+        "assessment_title": assessment.get("title", "Unknown") if assessment else "Unknown",
+        "student_id": sub["student_id"],
+        "student_name": student.get("name", "Unknown") if student else "Unknown",
+        "student_email": student.get("email", "") if student else "",
+        "score": sub.get("score"),
+        "total_marks": sub.get("total_marks"),
+        "percentage": sub.get("percentage"),
+        "results": sub.get("results", []),
+        "mcq_questions": mcq_questions,
+        "submitted_at": sub.get("submitted_at"),
+    }
+
+
 @router.get("/teacher/submissions/assessment/{assessment_id}")
 async def get_assessment_submissions_route(
     assessment_id: str,
