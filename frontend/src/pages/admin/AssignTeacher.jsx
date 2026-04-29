@@ -16,6 +16,7 @@ export default function AssignTeacher() {
   const [assignments, setAssignments] = useState([])
   const [subjects, setSubjects] = useState([])
   const [sections, setSections] = useState([])
+  const [teachers, setTeachers] = useState([])
   const [form, setForm] = useState({
     teacher_id: '',
     subject_id: '',
@@ -28,14 +29,16 @@ export default function AssignTeacher() {
 
   const fetchData = async () => {
     try {
-      const [assignmentsRes, subjectsRes, sectionsRes] = await Promise.all([
+      const [assignmentsRes, subjectsRes, sectionsRes, teachersRes] = await Promise.all([
         adminAPI.getTeacherAssignments(token),
         adminAPI.getSubjects(token),
         adminAPI.getSections(token),
+        adminAPI.getApprovedTeachers(token).catch(() => []),
       ])
       setAssignments(Array.isArray(assignmentsRes) ? assignmentsRes : assignmentsRes.assignments || [])
       setSubjects(Array.isArray(subjectsRes) ? subjectsRes : subjectsRes.subjects || [])
       setSections(Array.isArray(sectionsRes) ? sectionsRes : sectionsRes.sections || [])
+      setTeachers(Array.isArray(teachersRes) ? teachersRes : [])
     } catch (error) {
       console.error('Failed to fetch data:', error)
       addToast('Failed to load data', 'error')
@@ -91,6 +94,11 @@ export default function AssignTeacher() {
     return subject?.name || subjectId
   }
 
+  const getTeacherName = (teacherId) => {
+    const teacher = teachers.find(t => t.id === teacherId)
+    return teacher ? `${teacher.name} (${teacher.email})` : teacherId
+  }
+
   const getSectionNames = (sectionIds) => {
     if (!Array.isArray(sectionIds)) return '-'
     return sectionIds.map(id => {
@@ -110,12 +118,21 @@ export default function AssignTeacher() {
       <Card>
         <h2 className="text-lg font-semibold text-text-primary mb-4">New Assignment</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Teacher ID"
-            placeholder="Enter the teacher's user ID"
+          <Select
+            label="Teacher"
             value={form.teacher_id}
             onChange={(e) => setForm({ ...form, teacher_id: e.target.value })}
-          />
+          >
+            <option value="">Select a teacher</option>
+            {teachers.map((teacher) => (
+              <option key={teacher.id} value={teacher.id}>
+                {teacher.name} — {teacher.email}
+              </option>
+            ))}
+          </Select>
+          {teachers.length === 0 && (
+            <p className="text-sm text-warning">No approved teachers found. Approve a teacher first.</p>
+          )}
           <Select
             label="Subject"
             value={form.subject_id}
@@ -193,7 +210,7 @@ export default function AssignTeacher() {
                         <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
                           <User className="w-4 h-4 text-primary" />
                         </div>
-                        <span className="font-medium">{assignment.teacher_id}</span>
+                        <span className="font-medium">{getTeacherName(assignment.teacher_id)}</span>
                       </div>
                     </TableCell>
                     <TableCell>

@@ -46,6 +46,71 @@ async def student_required(current_user: dict = Depends(get_current_user)) -> di
     return current_user
 
 
+from app.database import get_database
+from bson import ObjectId
+
+
+@router.get("/teacher/my-assignments")
+async def get_my_assignments(current_user: dict = Depends(teacher_required)):
+    """Get subjects and sections assigned to the current teacher, with mapping."""
+    db = get_database()
+    teacher_id = str(current_user["_id"])
+
+    # Get all assignments for this teacher
+    assignments = await db.teacher_assignments.find(
+        {"teacher_id": teacher_id}
+    ).to_list(length=100)
+
+    # Build subject → section_ids mapping
+    subject_section_map = {}
+    all_subject_ids = set()
+    all_section_ids = set()
+
+    for a in assignments:
+        subj_id = a["subject_id"]
+        sec_ids = a.get("section_ids", [])
+        all_subject_ids.add(subj_id)
+        subject_section_map[subj_id] = sec_ids
+        for sid in sec_ids:
+            all_section_ids.add(sid)
+
+    # Fetch the actual subject documents
+    subjects = []
+    for sid in all_subject_ids:
+        try:
+            subject = await db.subjects.find_one({"_id": ObjectId(sid)})
+            if subject:
+                subjects.append({
+                    "id": str(subject["_id"]),
+                    "name": subject.get("name", ""),
+                    "year": subject.get("year"),
+                    "department_id": subject.get("department_id"),
+                })
+        except Exception:
+            pass
+
+    # Fetch the actual section documents
+    sections = []
+    for sid in all_section_ids:
+        try:
+            section = await db.sections.find_one({"_id": ObjectId(sid)})
+            if section:
+                sections.append({
+                    "id": str(section["_id"]),
+                    "name": section.get("name", ""),
+                    "year": section.get("year"),
+                    "department_id": section.get("department_id"),
+                })
+        except Exception:
+            pass
+
+    return {
+        "subjects": subjects,
+        "sections": sections,
+        "subject_section_map": subject_section_map,
+    }
+
+
 @router.post("/teacher/assessments", response_model=AssessmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_assessment_route(
     data: AssessmentCreate,

@@ -156,7 +156,7 @@ async def create_user(user_data) -> dict:
         resolved_section_id = section_result["id"]
 
     # Set is_approved based on role
-    if role == "teacher":
+    if role in ("teacher", "faculty"):
         is_approved = False
     else:
         is_approved = True  # admin and student are auto-approved

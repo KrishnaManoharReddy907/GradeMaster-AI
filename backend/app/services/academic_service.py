@@ -193,6 +193,16 @@ async def get_pending_users() -> List[dict]:
     return users
 
 
+async def get_approved_teachers() -> List[dict]:
+    """Get all approved faculty/teacher users for teacher assignment dropdown."""
+    db = get_database()
+    teachers = await db.users.find({
+        "role": {"$in": ["teacher", "faculty"]},
+        "is_approved": True
+    }).to_list(length=500)
+    return teachers
+
+
 async def approve_user(user_id: str) -> dict:
     db = get_database()
     try:

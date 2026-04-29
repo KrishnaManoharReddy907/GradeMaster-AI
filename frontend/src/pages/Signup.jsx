@@ -79,6 +79,13 @@ export default function Signup() {
         payload.section_name = form.section_name
       }
 
+      // Add faculty department
+      if (form.role === 'faculty') {
+        if (form.department_name) {
+          payload.department_name = form.department_name
+        }
+      }
+
       await authAPI.signup(payload)
       
       if (form.role === 'faculty') {
@@ -190,7 +197,7 @@ export default function Signup() {
                 <Input
                   label="Department"
                   type="text"
-                  placeholder="e.g., Computer Science"
+                  placeholder="e.g., Computer Science and Engineering"
                   value={form.department_name}
                   onChange={(e) => setForm({ ...form, department_name: e.target.value })}
                   error={errors.department_name}
@@ -219,11 +226,21 @@ export default function Signup() {
             )}
 
             {form.role === 'faculty' && (
-              <div className="flex items-start gap-3 p-3 bg-warning/10 rounded-xl text-warning">
-                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                <p className="text-sm">
-                  Faculty accounts require admin approval before you can access the platform.
-                </p>
+              <div className="space-y-4 p-4 bg-background rounded-xl border border-border">
+                <p className="text-sm font-medium text-text-secondary">Faculty Details</p>
+                <Input
+                  label="Department"
+                  type="text"
+                  placeholder="e.g., Computer Science and Engineering"
+                  value={form.department_name}
+                  onChange={(e) => setForm({ ...form, department_name: e.target.value })}
+                />
+                <div className="flex items-start gap-3 p-3 bg-warning/10 rounded-xl text-warning">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm">
+                    Faculty accounts require admin approval before you can access the platform.
+                  </p>
+                </div>
               </div>
             )}
 

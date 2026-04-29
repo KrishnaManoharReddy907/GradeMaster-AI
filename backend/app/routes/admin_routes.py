@@ -24,6 +24,7 @@ from app.services.academic_service import (
     assign_teacher,
     get_all_teacher_assignments,
     get_pending_users,
+    get_approved_teachers,
     approve_user
 )
 from app.database import get_database
@@ -209,6 +210,21 @@ async def get_teacher_assignments_route(current_user: dict = Depends(admin_requi
             created_at=a.get("created_at")
         )
         for a in assignments
+    ]
+
+
+@router.get("/approved-teachers")
+async def get_approved_teachers_route(current_user: dict = Depends(admin_required)):
+    """Get all approved teachers for the assignment dropdown."""
+    teachers = await get_approved_teachers()
+    return [
+        {
+            "id": str(t["_id"]),
+            "name": t.get("name", "Unknown"),
+            "email": t.get("email", ""),
+            "department_id": t.get("department_id"),
+        }
+        for t in teachers
     ]
 
 

@@ -151,10 +151,26 @@ export const adminAPI = {
     })
     return handleResponse(response)
   },
+
+  getApprovedTeachers: async (token) => {
+    const response = await fetch(`${BASE_URL}/api/admin/approved-teachers`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
 }
 
 // TEACHER APIs
 export const teacherAPI = {
+  getMyAssignments: async (token) => {
+    const response = await fetch(`${BASE_URL}/api/teacher/my-assignments`, {
+      method: 'GET',
+      headers: getHeaders(token),
+    })
+    return handleResponse(response)
+  },
+
   getAssessments: async (token) => {
     const response = await fetch(`${BASE_URL}/api/teacher/assessments`, {
       method: 'GET',

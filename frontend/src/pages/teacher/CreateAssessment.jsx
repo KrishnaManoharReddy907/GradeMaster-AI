@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, FileQuestion, Code, PenLine } from 'lucide-react'
 import { useApp } from '../../lib/context/AppContext'
-import { teacherAPI, adminAPI } from '../../lib/api'
+import { teacherAPI } from '../../lib/api'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
 import Input, { Select, Textarea } from '../../components/Input'
@@ -12,7 +12,9 @@ export default function CreateAssessment() {
   const { token, addToast } = useApp()
   const [loading, setLoading] = useState(false)
   const [subjects, setSubjects] = useState([])
+  const [allSections, setAllSections] = useState([])
   const [sections, setSections] = useState([])
+  const [subjectSectionMap, setSubjectSectionMap] = useState({})
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -38,22 +40,34 @@ export default function CreateAssessment() {
     return mcqTotal + codingTotal + manualTotal
   }, [mcqQuestions, codingQuestions, manualQuestions])
 
-  // Fetch subjects and sections for dropdowns
+  // Fetch only this teacher's assigned subjects and sections
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [subjectsRes, sectionsRes] = await Promise.all([
-          adminAPI.getSubjects(token).catch(() => []),
-          adminAPI.getSections(token).catch(() => []),
-        ])
-        setSubjects(Array.isArray(subjectsRes) ? subjectsRes : [])
-        setSections(Array.isArray(sectionsRes) ? sectionsRes : [])
+        const res = await teacherAPI.getMyAssignments(token).catch(() => null)
+        if (res) {
+          setSubjects(Array.isArray(res.subjects) ? res.subjects : [])
+          setAllSections(Array.isArray(res.sections) ? res.sections : [])
+          setSubjectSectionMap(res.subject_section_map || {})
+        }
       } catch (error) {
-        console.error('Failed to fetch subjects/sections:', error)
+        console.error('Failed to fetch teacher assignments:', error)
       }
     }
     fetchData()
   }, [token])
+
+  // Filter sections when subject changes
+  useEffect(() => {
+    if (form.subject_id && subjectSectionMap[form.subject_id]) {
+      const allowedIds = subjectSectionMap[form.subject_id]
+      setSections(allSections.filter(s => allowedIds.includes(s.id)))
+    } else {
+      setSections([])
+    }
+    // Clear selected sections when subject changes
+    setForm(prev => ({ ...prev, section_ids: [] }))
+  }, [form.subject_id, subjectSectionMap, allSections])
 
   const handleSectionToggle = (sectionId) => {
     setForm(prev => ({
@@ -434,7 +448,7 @@ export default function CreateAssessment() {
                       onChange={() => handleSectionToggle(section.id)}
                       className="w-4 h-4 text-primary rounded"
                     />
-                    <span className="text-sm">{section.name}</span>
+                    <span className="text-sm">{section.name} (Year {section.year})</span>
                   </label>
                 ))}
               </div>
