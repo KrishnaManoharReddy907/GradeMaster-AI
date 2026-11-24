@@ -13,7 +13,7 @@ _Last updated: 2026-11-25 (session 1, continued)_
 | Stage B: evaluation engines | ☑ done; live smoke tests passed (Gemini JSON, Judge0 batch, Vision OCR, rubric grading, code feedback) |
 | Stage C: new features | ☑ review queue, structural plagiarism, topic mastery, admin governance, question bank, AI question generator |
 | Stage D: frontend redesign | ☑ new React app (design system, 3 portals, exam flows, SVG charts), 19 Vitest tests, screenshot QA |
-| Stage E: hardening, deploy, docs | ◐ next |
+| Stage E: hardening, deploy, docs | ◐ hardening + Docker + Render blueprint + deployment guide done; owner account setup and live deploy pending |
 
 ## What changed in the backend (commit `299f33e`)
 * `app/core/`: config (pydantic-settings), security, deps (role + ownership), errors, observability (logging, request id, rate limit)
@@ -46,18 +46,28 @@ _Last updated: 2026-11-25 (session 1, continued)_
 * Design system in `components/ui/` (primitives + domain badges); charts in `components/charts.jsx` with a Chart/Table toggle on every chart.
 * Portals: admin (overview, approvals, people, academics, assignments, audit), teacher (dashboard, builder, workspace, coding/manual/MCQ review, similarity compare, review queue, question bank, class analytics, student profile, report), student (dashboard, timed MCQ/coding/handwritten exams with server-clock deadline, results, released paper, progress).
 * Removed: old pages/components, placeholder images, Plotly.
-* Tests: `npm test` (Vitest: api client, route guards, charts, deadline clock, formatters). Backend: `pytest` 52 passing.
+* Tests: `npm test` (Vitest, 19: api client, route guards, charts, deadline clock, formatters). Backend: `pytest` 56 passing.
 * Visual QA by headless Chrome screenshots (desktop, dark mode, 390 px mobile); no page errors.
 * Analytics: `hardest_questions[]` now includes `question_text`.
+
+## Production hardening (Stage E)
+* Security headers middleware (nosniff, frame DENY, CSP, HSTS in production); API docs off in production.
+* Rate limiter: real client IP behind proxies (`TRUSTED_PROXY_HOPS`), idle-key pruning.
+* Optional `BOOTSTRAP_TOKEN` gates first-admin creation on a fresh public deploy.
+* Monaco bundled locally (no CDN at exam time); inline theme script moved to `public/theme-init.js`.
+* `backend/Dockerfile` (non-root, healthcheck, single worker) built and smoke-tested locally in production mode.
+* `render.yaml` blueprint (API + static frontend with strict CSP); the production build was tested under that exact CSP with no violations.
+* Guide: `docs/DEPLOYMENT.md` (Atlas, Gemini, Render, first sign-in, verification, data migration, env reference).
 
 ## Data migrations
 Applied to `grademaster_dev` only. One duplicate MCQ submission was moved to `submission_duplicates_archive`.
 ⚠ The original `grademaster` DB has **not** been migrated. That happens at deployment, with owner approval.
 
 ## External actions needed from owner
-None yet (deployment accounts are requested in Stage E).
+Follow `docs/DEPLOYMENT.md` sections 1-4: create a MongoDB Atlas cluster, a Gemini API key and a Render account, then
+deploy the blueprint. Decide whether production starts empty or receives the existing local data (section 6).
 
 ## Next steps
-1. Stage E: security hardening review, Dockerfile + deployment config (backend host, static frontend, MongoDB Atlas).
-2. Owner sets up hosting accounts and secrets (instructions will be provided); production DB migration only with approval.
-3. README + thesis-level master documentation.
+1. Owner: accounts + deploy per `docs/DEPLOYMENT.md`; then post-deploy verification together.
+2. README rewrite + thesis-level master documentation.
+3. Merge `feature/gradmaster-transformation` into `main`: only with owner approval.

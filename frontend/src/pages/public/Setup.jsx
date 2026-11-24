@@ -12,10 +12,11 @@ export default function Setup() {
   const navigate = useNavigate()
   const toast = useToast()
   const setup = useAsync(() => api.auth.checkSetup(), [])
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '', token: '' })
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(false)
   const mismatch = form.confirm && form.confirm !== form.password
+  const tokenRequired = Boolean(setup.data?.token_required)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -23,7 +24,7 @@ export default function Setup() {
     setPending(true)
     setError(null)
     try {
-      await api.auth.bootstrapAdmin({ name: form.name, email: form.email, password: form.password })
+      await api.auth.bootstrapAdmin({ name: form.name, email: form.email, password: form.password, ...(tokenRequired ? { setup_token: form.token.trim() } : {}) })
       toast.success('Administrator account created. Sign in to continue.')
       navigate('/login')
     } catch (err) {
@@ -46,6 +47,11 @@ export default function Setup() {
       <form onSubmit={submit} className="space-y-4">
         <Callout tone="brand" icon={ShieldCheck}>The administrator manages departments, sections, subjects, staff and approvals.</Callout>
         {error && <Callout tone="bad">{error.message}</Callout>}
+        {tokenRequired && (
+          <Field label="Setup token" hint="The BOOTSTRAP_TOKEN value from the server's environment settings.">
+            {({ id }) => <Input id={id} required autoComplete="off" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} />}
+          </Field>
+        )}
         <Field label="Full name">{({ id }) => <Input id={id} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}</Field>
         <Field label="Email">{({ id }) => <Input id={id} type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />}</Field>
         <Field label="Password" hint="At least 8 characters with letters and a number.">

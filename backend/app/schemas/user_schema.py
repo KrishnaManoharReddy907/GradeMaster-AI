@@ -73,6 +73,7 @@ class UserCreate(_EmailNormalized, _StrongPassword):
 class AdminBootstrap(_EmailNormalized, _StrongPassword):
     """First-run admin creation (only allowed while no admin exists)."""
     name: str = Field(..., min_length=2, max_length=100)
+    setup_token: Optional[str] = Field(default=None, max_length=256)
 
     @field_validator("name")
     @classmethod

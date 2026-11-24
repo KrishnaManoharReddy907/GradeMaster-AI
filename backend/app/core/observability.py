@@ -61,6 +61,18 @@ RATE_LIMIT_RULES = [
 ]
 
 
+def client_ip(request: Request) -> str:
+    """The caller's IP. Behind ``TRUSTED_PROXY_HOPS`` reverse proxies (e.g. 1 on Render),
+    read it from X-Forwarded-For counting from the right, the end proxies append to and
+    clients cannot forge."""
+    hops = settings.trusted_proxy_hops
+    if hops > 0:
+        forwarded = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(forwarded) >= hops:
+            return forwarded[-hops]
+    return request.client.host if request.client else "unknown"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Sliding-window limiter keyed by client IP + rule.
 
@@ -69,19 +81,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     if it is ever scaled horizontally.
     """
 
+    PRUNE_EVERY = 300.0  # seconds; drops keys idle longer than the longest window
+
     def __init__(self, app):
         super().__init__(app)
         self._hits: Dict[str, Deque[float]] = defaultdict(deque)
+        self._last_prune = time.monotonic()
+        self._max_window = max(w for _, _, w in RATE_LIMIT_RULES)
+
+    def _prune(self, now: float) -> None:
+        if now - self._last_prune < self.PRUNE_EVERY:
+            return
+        self._last_prune = now
+        for key in [k for k, d in self._hits.items() if not d or now - d[-1] > self._max_window]:
+            del self._hits[key]
 
     async def dispatch(self, request: Request, call_next):
         if not settings.rate_limit_enabled or request.method == "OPTIONS":
             return await call_next(request)
         path = request.url.path
+        now = time.monotonic()
+        self._prune(now)
         for prefix, limit, window in RATE_LIMIT_RULES:
             if path.startswith(prefix):
-                client = request.client.host if request.client else "unknown"
-                key = f"{prefix}|{client}"
-                now = time.monotonic()
+                key = f"{prefix}|{client_ip(request)}"
                 hits = self._hits[key]
                 while hits and now - hits[0] > window:
                     hits.popleft()
@@ -95,3 +118,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 hits.append(now)
                 break
         return await call_next(request)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Conservative headers for a JSON/file API. HSTS only in production (HTTPS)."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        h = response.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        if not request.url.path.startswith("/api/docs"):
+            h.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        if settings.is_production:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response

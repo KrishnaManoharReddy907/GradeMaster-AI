@@ -1,7 +1,10 @@
+import hmac
+
 from fastapi import APIRouter, Depends, status
 
 from app.core.config import settings
 from app.core.deps import get_current_user  # re-exported for legacy imports
+from app.core.errors import Forbidden
 from app.core.security import create_access_token
 from app.schemas.user_schema import (
     AdminBootstrap,
@@ -35,7 +38,11 @@ async def signup(user_data: UserCreate):
 
 @router.post("/bootstrap-admin", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def bootstrap_admin(data: AdminBootstrap):
-    """Create the first administrator. Disabled once an admin exists."""
+    """Create the first administrator. Disabled once an admin exists; requires
+    BOOTSTRAP_TOKEN when the server has one configured."""
+    expected = settings.bootstrap_token
+    if expected and not hmac.compare_digest((data.setup_token or "").encode(), expected.encode()):
+        raise Forbidden("A valid setup token is required to create the administrator.", code="setup_token_invalid")
     user = await create_bootstrap_admin(data)
     await record_audit(user, "admin.bootstrap", "user", str(user["_id"]))
     return MessageResponse(message="Administrator account created. You can sign in now.")

@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -5,7 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings  # loads .env first; fails fast on weak secrets
 from app.core.errors import register_exception_handlers
-from app.core.observability import RateLimitMiddleware, RequestContextMiddleware, configure_logging
+from app.core.observability import (
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+    SecurityHeadersMiddleware,
+    configure_logging,
+)
 from app.database import close_db, connect_db, run_migrations
 from app.routes import (
     admin_routes,
@@ -20,10 +26,13 @@ from app.routes import (
 )
 
 configure_logging()
+log = logging.getLogger("grademaster")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.is_production and any("localhost" in o or "127.0.0.1" in o for o in settings.cors_origin_list):
+        log.warning("CORS_ORIGINS still lists localhost in production; set it to the deployed frontend URL.")
     database = await connect_db()
     await run_migrations(database)
     from app.jobs.worker import start_worker, stop_worker
@@ -40,14 +49,15 @@ app = FastAPI(
     description="AI-assisted assessment and evaluation platform (MCQ, coding, handwritten).",
     version="2.0.0",
     lifespan=lifespan,
-    docs_url="/api/docs",
+    docs_url="/api/docs" if settings.api_docs_enabled else None,
     redoc_url=None,
-    openapi_url="/api/openapi.json",
+    openapi_url="/api/openapi.json" if settings.api_docs_enabled else None,
 )
 
 register_exception_handlers(app)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

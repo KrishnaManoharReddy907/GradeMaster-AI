@@ -3,6 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.deps import get_current_user, require_admin
 from app.database import get_database
 from app.schemas.academic_schema import (
@@ -52,7 +53,8 @@ def _assignment(a: dict) -> TeacherAssignmentResponse:
 async def check_admin_setup():
     """Public: tells the landing page whether first-run admin setup is needed."""
     admin = await get_database().users.find_one({"role": "admin"}, {"_id": 1})
-    return {"admin_exists": admin is not None, "setup_required": admin is None}
+    return {"admin_exists": admin is not None, "setup_required": admin is None,
+            "token_required": admin is None and bool(settings.bootstrap_token)}
 
 
 # ─── Catalogue ────────────────────────────────────────────────────────────

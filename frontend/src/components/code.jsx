@@ -3,7 +3,7 @@ import { useTheme } from '@/lib/ui-state'
 import { Spinner } from './ui'
 import { cn } from '@/lib/utils'
 
-const Monaco = lazy(() => import('@monaco-editor/react'))
+const Monaco = lazy(() => import('./monaco-setup'))
 
 export const MONACO_LANG = { python: 'python', java: 'java', cpp: 'cpp', c: 'c', javascript: 'javascript' }
 export const LANGUAGE_LABEL = { python: 'Python 3', java: 'Java', cpp: 'C++', c: 'C', javascript: 'JavaScript' }

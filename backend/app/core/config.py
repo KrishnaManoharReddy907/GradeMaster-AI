@@ -41,10 +41,16 @@ class Settings(BaseSettings):
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 120
+    # When set, first-run admin creation also requires this token (protects a fresh public deploy).
+    bootstrap_token: Optional[str] = None
 
     # HTTP
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     rate_limit_enabled: bool = True
+    # Reverse proxies in front of the API that append to X-Forwarded-For (Render: 1).
+    trusted_proxy_hops: int = 0
+    # Interactive docs at /api/docs. Defaults to on in development, off in production.
+    enable_api_docs: Optional[bool] = None
 
     # AI / external services
     gemini_api_key: Optional[str] = None
@@ -80,6 +86,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return (not self.is_production) if self.enable_api_docs is None else self.enable_api_docs
 
     @property
     def max_upload_bytes(self) -> int:

@@ -8,13 +8,7 @@
     <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)" />
     <title>GradeMaster</title>
     <meta name="description" content="GradeMaster: AI-assisted assessment for MCQ, coding and handwritten work, with teachers in control of every final grade." />
-    <script>
-      // Apply the saved theme before first paint to avoid a flash.
-      try {
-        var t = localStorage.getItem('gm-theme');
-        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>
