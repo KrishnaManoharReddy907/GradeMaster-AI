@@ -9,9 +9,10 @@ db = None
 async def connect_db():
     global client, db
     mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+    db_name = os.getenv("MONGO_DB_NAME", "grademaster")
     client = AsyncIOMotorClient(mongo_uri)
-    db = client.grademaster
-    print("Connected to MongoDB")
+    db = client[db_name]
+    print(f"Connected to MongoDB database '{db_name}'")
 
 
 async def close_db():
