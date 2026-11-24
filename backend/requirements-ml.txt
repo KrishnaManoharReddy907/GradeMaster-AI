@@ -1,0 +1,8 @@
+# Optional: semantic (CodeBERT) plagiarism signal and local Ollama LLM.
+# Needs ~2 GB RAM; enable with ENABLE_CODEBERT=true / LLM_PROVIDER=ollama.
+-r requirements.txt
+torch==2.11.0
+transformers==5.5.0
+scikit-learn==1.8.0
+numpy==2.3.5
+ollama==0.6.1

@@ -1,441 +1,253 @@
-import os
-import httpx
-import base64
-from datetime import datetime
-from typing import Optional, List
+"""Coding evaluation: sandboxed execution, analysis, plagiarism and AI feedback."""
+
+import logging
+import re
+from datetime import datetime, timezone
+from typing import Optional
+
 from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo import ReturnDocument
 
-from app.services.judge0_service import execute_code
+from app.ai.code_feedback import generate_code_feedback
+from app.core.config import settings
+from app.core.errors import BadRequest, Conflict, NotFound, ServiceUnavailable
 from app.database import get_database
-from app.services.assessment_service import get_assessment_by_id
-from app.services.agents.agent_pipeline import run_agent_pipeline
-from app.services.agents.ast_analysis_agent import analyze_code_ast
+from app.evaluation import plagiarism
 from app.services.agents.bug_detection_agent import detect_bugs
-from app.services.agents.llm_code_fix_agent import generate_code_fix
+from app.services.judge0_service import execute_batch, outputs_match
+
+logger = logging.getLogger("grademaster.evaluation")
+
+EVALUABLE_STATUSES = ["pending", "failed", "evaluated"]
 
 
-JUDGE0_API_URL = "https://judge0-ce.judge0.com"
-JUDGE0_API_KEY = ""
-
-LANGUAGE_IDS = {
-    "python": 71,
-    "cpp": 54,
-    "java": 62,
-    "javascript": 63,
-    "c": 50
-}
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-async def get_submission_by_id(submission_id: str) -> Optional[dict]:
-    db = get_database()
-    try:
-        submission = await db.coding_submissions.find_one({"_id": ObjectId(submission_id)})
-        return submission
-    except Exception:
-        return None
+def analyze_structure(code: str, language: str) -> dict:
+    """Language-aware structural metrics (tree-sitter AST for Python, heuristics otherwise)."""
+    if language == "python":
+        try:
+            from app.services.agents.ast_analysis_agent import analyze_code_ast
+            result = analyze_code_ast(code)
+            result["method"] = "ast"
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.info("AST analysis unavailable: %s", type(exc).__name__)
+    lines = [l for l in code.splitlines() if l.strip()]
+    loops = len(re.findall(r"\b(for|while)\b", code))
+    conditions = len(re.findall(r"\b(if|else if|switch|case)\b", code))
+    functions = len(re.findall(r"\b(def|function)\b|\w+\s+\w+\s*\([^;{]*\)\s*\{", code))
+    depth = max_depth = 0
+    for ch in code:
+        if ch == "{":
+            depth += 1
+            max_depth = max(max_depth, depth)
+        elif ch == "}":
+            depth = max(0, depth - 1)
+    complexity = "high" if loops >= 3 or max_depth > 5 else "medium" if loops >= 1 else "low"
+    return {"loops": loops, "conditions": conditions, "functions": functions, "returns": len(re.findall(r"\breturn\b", code)),
+            "nesting_depth": max_depth, "complexity": complexity, "lines": len(lines), "method": "heuristic"}
 
 
-# ❗ OLD SELF-HOST / BASE64 JUDGE0 EXECUTOR (COMMENTED — NOT USED NOW)
+async def _plagiarism_check(db, submission: dict) -> dict:
+    others = await db.coding_submissions.find(
+        {"assessment_id": submission["assessment_id"], "question_id": submission["question_id"],
+         "_id": {"$ne": submission["_id"]}},
+        {"code": 1, "language": 1, "analysis.plagiarism": 1},
+    ).to_list(2000)
+    score, match_id = plagiarism.best_match(
+        submission["code"], submission["language"],
+        [(str(o["_id"]), o.get("code", ""), o.get("language")) for o in others])
+    result = {"score": round(score * 100), "similar_submission_id": match_id,
+              "level": plagiarism.classify(score), "method": "winnowing"}
 
-"""
-async def execute_code_judge0(
-    source_code: str,
-    language: str,
-    stdin: str,
-    expected_output: str,
-    time_limit: float = 2.0,
-    memory_limit: int = 128000
-) -> dict:
-    ...
-"""
-# ---------------------------------------------------------------
+    if settings.enable_codebert:
+        try:
+            from app.services.agents.semantic_plagiarism_agent import detect_semantic_plagiarism
+            semantic = await detect_semantic_plagiarism(db, submission)
+            result["semantic_score"] = semantic.get("plagiarism_score", 0)
+        except Exception:  # noqa: BLE001
+            logger.info("CodeBERT check skipped")
+
+    # Symmetric: let the partner know about the match too, if stronger than what it has.
+    if match_id and score >= plagiarism.WARN_THRESHOLD:
+        partner = next((o for o in others if str(o["_id"]) == match_id), None)
+        partner_score = ((partner or {}).get("analysis") or {}).get("plagiarism", {}).get("score", 0)
+        if partner is not None and result["score"] > (partner_score or 0):
+            await db.coding_submissions.update_one(
+                {"_id": partner["_id"]},
+                {"$set": {"analysis.plagiarism": {**result, "similar_submission_id": str(submission["_id"])}},
+                 "$addToSet": {"review_flags": "possible_plagiarism"}})
+    return result
 
 
 async def evaluate_submission(submission_id: str, evaluator_id: str) -> dict:
-
     db = get_database()
-
-    submission = await get_submission_by_id(submission_id)
-    if not submission:
-        return {"error": "Submission not found"}
-
-    if submission.get("status") == "evaluated":
-        return {"error": "Submission already evaluated"}
-
-    assessment = await get_assessment_by_id(submission["assessment_id"])
-    if not assessment:
-        return {"error": "Assessment not found"}
-
-    coding_questions = assessment.get("coding_questions", [])
-
-    question = None
-    for q in coding_questions:
-        if q.get("question_id") == submission["question_id"]:
-            question = q
-            break
-
-    if not question:
-        return {"error": "Question not found in assessment"}
-
-    test_cases = question.get("test_cases", [])
-
-    # Extract problem description with multiple fallbacks
-    problem_description = (
-        question.get("description") or
-        question.get("question_text") or
-        question.get("title") or
-        question.get("problem_statement") or
-        ""
-    )
-
-    # Final fallback if still empty
-    if not problem_description.strip():
-        problem_description = "Solve the given coding problem based on test cases."
-
-    # DEBUG: Log question keys and description
-    print(f"[Evaluation] Question keys: {list(question.keys())}")
-    print(f"[Evaluation] Problem description extracted: {problem_description[:100]}...")
-
-    if not test_cases:
-        return {"error": "No test cases found"}
-
-    source_code = submission["code"]
-    language = submission["language"]
-
-    test_results = []
-    passed_tests = 0
-    total_tests = len(test_cases)
-
-    for i, test_case in enumerate(test_cases):
-
-        stdin = test_case.get("input", "")
-        expected_output = test_case.get("expected_output", "")
-        is_hidden = test_case.get("is_hidden", False)
-
-        # ⭐ NEW PUBLIC JUDGE0 EXECUTION
-        result = await execute_code(
-            source_code,
-            language,
-            stdin
-        )
-
-        stdout = result.get("stdout") or ""
-
-        passed = False
-        if stdout.strip() == expected_output.strip():
-            passed = True
-            passed_tests += 1
-
-        test_result = {
-            "test_case_index": i,
-            "passed": passed,
-            "status_description": result.get("status", {}).get("description", "Error"),
-            "time": result.get("time"),
-            "memory": result.get("memory"),
-            "is_hidden": is_hidden
-        }
-
-        if not is_hidden:
-            test_result["input"] = stdin
-            test_result["expected_output"] = expected_output
-            test_result["actual_output"] = stdout
-
-        if result.get("stderr"):
-            test_result["stderr"] = result.get("stderr")
-
-        if result.get("compile_output"):
-            test_result["compile_output"] = result.get("compile_output")
-
-        test_results.append(test_result)
-
-    max_marks = question.get("marks", 0)
-
-    score = round((passed_tests / total_tests) * max_marks, 2) if total_tests > 0 else 0
-
-    # Run AST analysis on source code (safe - won't crash on errors)
     try:
-        ast_analysis = analyze_code_ast(source_code)
-    except Exception as e:
-        print(f"[Evaluation] AST analysis failed: {e}")
-        ast_analysis = {
-            "loops": 0,
-            "conditions": 0,
-            "functions": 0,
-            "returns": 0,
-            "nesting_depth": 0,
-            "complexity": "unknown",
-            "details": {"parse_error": True, "error_message": str(e)}
-        }
+        oid = ObjectId(submission_id)
+    except (InvalidId, TypeError):
+        raise NotFound("Submission not found")
 
-    # Check if all tests passed - skip bug detection and code fix
-    if passed_tests == total_tests:
-        # All tests passed - clean output, no bugs, no fixes
-        bugs = []
-        code_fix = {}
-        suggested_fix = {}
-        ai_feedback = "All test cases passed successfully. Excellent work!"
-        feedback = "All test cases passed!"
-        print(f"[Evaluation] All {total_tests} tests passed - skipping bug detection and code fix agents")
-    else:
-        # Some tests failed - run bug detection and code fix agents
-        bugs = detect_bugs(
-            test_results=test_results,
-            ast_analysis=ast_analysis,
-            stderr=None,
-            compile_output=None
-        )
+    existing = await db.coding_submissions.find_one({"_id": oid}, {"status": 1})
+    if not existing:
+        raise NotFound("Submission not found")
+    if existing["status"] in ("reviewed", "finalized"):
+        raise Conflict("This submission has been reviewed by a teacher and cannot be re-evaluated")
 
-        # DEBUG: Log problem description before calling code fix
-        print(f"[Evaluation] DEBUG PROBLEM DESCRIPTION: {problem_description}")
-
-        # Run Code Fix Agent
-        code_fix = await generate_code_fix(
-            code=source_code,
-            bugs=bugs,
-            language=language,
-            test_cases=test_results,
-            problem_description=problem_description
-        )
-        
-        # Set feedback based on results
-        if passed_tests == 0:
-            feedback = "No test cases passed. Please check your solution."
-        else:
-            feedback = f"Partially correct. {passed_tests}/{total_tests} test cases passed."
-        
-        # These will be set by agent_results below
-        suggested_fix = None
-        ai_feedback = None
-
-    # Run agent pipeline for comprehensive analysis (always runs for AST + analysis)
-    agent_results = await run_agent_pipeline(
-        db=db,
-        submission=submission,
-        score=score,
-        passed_tests=passed_tests,
-        total_tests=total_tests,
-        test_results=test_results,
-        assessment_title=assessment.get("title", ""),
-        question_description=problem_description,
-        ast_analysis=ast_analysis
+    submission = await db.coding_submissions.find_one_and_update(
+        {"_id": oid, "status": {"$in": EVALUABLE_STATUSES}},
+        {"$set": {"status": "evaluating", "evaluation_started_at": _now()}},
+        return_document=ReturnDocument.AFTER,
     )
+    if not submission:
+        raise Conflict("This submission is already being evaluated")
 
-    # Use agent results only if not all tests passed
-    if passed_tests < total_tests:
-        suggested_fix = agent_results.get("suggested_fix", {})
-        ai_feedback = agent_results.get("ai_feedback", "Review your solution.")
+    try:
+        return await _evaluate(db, submission, evaluator_id)
+    except Exception as exc:
+        await db.coding_submissions.update_one(
+            {"_id": oid, "status": "evaluating"},
+            {"$set": {"status": "failed", "evaluation_error": getattr(exc, "detail", str(exc))[:300]}})
+        raise
 
-    # Determine result status and calculate accuracy score
-    test_pass_ratio = (passed_tests / total_tests) if total_tests > 0 else 0
-    
-    if passed_tests == total_tests:
-        result_status = "correct"
-    elif passed_tests > 0:
-        result_status = "partial"
-    else:
-        result_status = "wrong"
-    
-    # Calculate accuracy score (0-100)
-    # If all tests pass → 100% (student solved it correctly, code style is irrelevant)
-    # If partial/failed → weighted formula based on test pass rate + code quality + execution
-    if passed_tests == total_tests:
-        accuracy_score = 100
-    else:
-        # Test pass ratio is the dominant factor (80% weight)
-        test_score = test_pass_ratio * 80
-        
-        # Code quality from AST analysis (10% weight)
-        quality_score = 0
-        if ast_analysis:
-            low_nesting = ast_analysis.get("nesting_depth", 10) <= 4
-            reasonable_complexity = ast_analysis.get("complexity", "unknown") != "high"
-            quality_score += 5 if low_nesting else 2
-            quality_score += 5 if reasonable_complexity else 0
-        
-        # Execution quality — did tests run without crashing? (10% weight)
-        runtime_errors = sum(1 for tr in test_results if tr.get("stderr"))
-        exec_score = 10 if runtime_errors == 0 else max(0, 10 - runtime_errors * 2)
-        
-        accuracy_score = round(min(test_score + quality_score + exec_score, 100))
 
-    # Build structured response
-    result_summary = {
-        "ai_score": score,
-        "max_marks": max_marks,
-        "passed": passed_tests,
-        "total": total_tests,
-        "status": result_status,
-        "accuracy_score": accuracy_score,
-        "feedback": feedback
-    }
+async def _evaluate(db, submission: dict, evaluator_id: str) -> dict:
+    assessment = await db.assessments.find_one({"_id": ObjectId(submission["assessment_id"])})
+    if not assessment:
+        raise NotFound("Assessment not found")
+    question = next((q for q in assessment.get("coding_questions", [])
+                     if q.get("question_id") == submission["question_id"]), None)
+    if not question:
+        raise NotFound("Question not found in assessment")
+    test_cases = question.get("test_cases") or []
+    if not test_cases:
+        raise BadRequest("This question has no test cases")
 
-    analysis = {
-        "ast": ast_analysis,
-        "code_quality": agent_results.get("analysis", {}),
-        "plagiarism": {
-            "score": agent_results.get("plagiarism_score", 0),
-            "similar_submission_id": agent_results.get("similar_submission_id")
-        }
-    }
-
-    issues = {
-        "bugs": bugs,
-        "test_results": test_results
-    }
-
-    ai_insights = {
-        "feedback": ai_feedback,
-        "suggested_fix": suggested_fix,
-        "code_fix": code_fix
-    }
-
-    await db.coding_submissions.update_one(
-        {"_id": ObjectId(submission_id)},
-        {"$set": {
-            "status": "evaluated",
-            "ai_score": score,
-            "max_marks": max_marks,
-            "passed_tests": passed_tests,
-            "total_tests": total_tests,
-            "evaluated_by": evaluator_id,
-            "evaluated_at": datetime.utcnow(),
-            "code_embedding": agent_results.get("code_embedding"),
-            # Structured output
-            "result_summary": result_summary,
-            "analysis": analysis,
-            "issues": issues,
-            "ai_insights": ai_insights
-        }}
+    code, language = submission["code"], submission["language"]
+    runs = await execute_batch(
+        code, language, [t.get("input", "") for t in test_cases],
+        cpu_time_limit=float(question.get("time_limit_seconds", 2)),
+        memory_limit_mb=int(question.get("memory_limit_mb", 256)),
     )
+    if all(r.get("error") for r in runs):
+        raise ServiceUnavailable("The code execution service is unavailable. Try again shortly.")
 
-    return {
-        "submission_id": submission_id,
-        "result_summary": result_summary,
-        "analysis": analysis,
-        "issues": issues,
-        "ai_insights": ai_insights
-    }
+    test_results, passed = [], 0
+    for i, (tc, run) in enumerate(zip(test_cases, runs)):
+        ok = run.get("status", {}).get("id") in (3, 4) and outputs_match(run.get("stdout"), tc.get("expected_output"))
+        passed += ok
+        tr = {"test_case_index": i, "passed": ok, "is_hidden": bool(tc.get("is_hidden")),
+              "status_description": "Accepted" if ok else (
+                  "Wrong Answer" if run.get("status", {}).get("id") in (3, 4) else run.get("status", {}).get("description", "Error")),
+              "time": run.get("time"), "memory": run.get("memory")}
+        if not tc.get("is_hidden"):
+            tr.update(input=tc.get("input", ""), expected_output=tc.get("expected_output", ""),
+                      actual_output=run.get("stdout") or "")
+        if run.get("stderr"):
+            tr["stderr"] = run["stderr"][:2000]
+        if run.get("compile_output"):
+            tr["compile_output"] = run["compile_output"][:2000]
+        test_results.append(tr)
+
+    total = len(test_cases)
+    max_marks = float(question.get("marks", 0))
+    partial = (assessment.get("coding_config") or {}).get("partial_marking", True)
+    ratio = passed / total if total else 0
+    score = round(ratio * max_marks, 2) if partial else (max_marks if passed == total else 0.0)
+
+    structure = analyze_structure(code, language)
+    bugs = [] if passed == total else detect_bugs(test_results=test_results, ast_analysis=structure)
+    plag = await _plagiarism_check(db, submission)
+
+    problem = "\n".join(filter(None, [question.get("title"), question.get("problem_statement"),
+                                      question.get("input_format"), question.get("output_format")]))
+    ai = await generate_code_feedback(code=code, language=language, problem=problem, passed=passed,
+                                      total=total, test_results=test_results, bugs=bugs)
+
+    status_word = "correct" if passed == total else "partial" if passed else "wrong"
+    if passed == total:
+        accuracy = 100
+    else:
+        quality = (5 if structure.get("nesting_depth", 10) <= 4 else 2) + (5 if structure.get("complexity") != "high" else 0)
+        runtime_errors = sum(1 for t in test_results if t.get("stderr"))
+        accuracy = round(min(ratio * 80 + quality + max(0, 10 - runtime_errors * 2), 100))
+
+    flags = []
+    if plag["level"] in ("high", "moderate"):
+        flags.append("possible_plagiarism")
+    if any(r.get("error") for r in runs):
+        flags.append("execution_incomplete")
+    if ai.get("source") != "ai":
+        flags.append("ai_feedback_unavailable")
+
+    result_summary = {"ai_score": score, "max_marks": max_marks, "passed": passed, "total": total,
+                      "status": status_word, "accuracy_score": accuracy, "partial_marking": partial,
+                      "feedback": "All test cases passed." if passed == total else f"{passed}/{total} test cases passed."}
+    analysis = {"ast": structure, "plagiarism": plag,
+                "code_quality": {"language": language, "lines": len([l for l in code.splitlines() if l.strip()]),
+                                 "notes": ai.get("quality_notes", [])}}
+    issues = {"bugs": bugs, "test_results": test_results}
+    ai_insights = {"feedback": ai.get("feedback"), "mistake_summary": ai.get("mistake_summary"),
+                   "suggested_fix": {"explanation": ai.get("fix_explanation"), "change": ai.get("suggested_change")},
+                   "code_fix": {"corrected_code": ai.get("corrected_code"), "fix_explanation": ai.get("fix_explanation"),
+                                "suggested_change": ai.get("suggested_change")},
+                   "source": ai.get("source")}
+
+    await db.coding_submissions.update_one({"_id": submission["_id"]}, {"$set": {
+        "status": "evaluated", "ai_score": score, "max_marks": max_marks, "passed_tests": passed,
+        "total_tests": total, "evaluated_by": evaluator_id, "evaluated_at": _now(), "evaluation_error": None,
+        "result_summary": result_summary, "analysis": analysis, "issues": issues, "ai_insights": ai_insights,
+        "review_flags": flags,
+    }})
+    return {"submission_id": str(submission["_id"]), "result_summary": result_summary, "analysis": analysis,
+            "issues": issues, "ai_insights": ai_insights, "review_flags": flags}
 
 
-async def batch_evaluate_assessment(assessment_id: str, evaluator_id: str) -> dict:
+async def queue_assessment_evaluation(assessment_id: str, evaluator_id: str) -> dict:
+    from app.jobs.worker import enqueue
 
     db = get_database()
+    subs = await db.coding_submissions.find(
+        {"assessment_id": assessment_id, "status": {"$in": ["pending", "failed"]}}, {"_id": 1}).to_list(5000)
+    jobs = [await enqueue("evaluate_coding", str(s["_id"]), created_by=evaluator_id) for s in subs]
+    return {"assessment_id": assessment_id, "queued": len(jobs), "job_ids": [str(j["_id"]) for j in jobs]}
 
-    submissions = await db.coding_submissions.find({
-        "assessment_id": assessment_id,
-        "status": "pending"
-    }).to_list(length=1000)
 
-    if not submissions:
-        return {"message": "No pending submissions found", "evaluated": 0}
-
-    evaluated = 0
-    failed = 0
-    results = []
-
-    for submission in submissions:
-
-        result = await evaluate_submission(str(submission["_id"]), evaluator_id)
-
-        if "error" in result:
-            failed += 1
-            results.append({
-                "submission_id": str(submission["_id"]),
-                "error": result["error"]
-            })
-        else:
-            evaluated += 1
-            summary = result.get("result_summary", {})
-            results.append({
-                "submission_id": str(submission["_id"]),
-                "score": summary.get("ai_score"),
-                "passed_tests": summary.get("passed"),
-                "total_tests": summary.get("total")
-            })
-
+def serialize_coding_detail(s: dict, student: Optional[dict] = None) -> dict:
+    summary = s.get("result_summary") or {}
+    insights = s.get("ai_insights") or {}
     return {
-        "assessment_id": assessment_id,
-        "total_submissions": len(submissions),
-        "evaluated": evaluated,
-        "failed": failed,
-        "results": results
-    }
-
-
-async def get_submission_result(submission_id: str) -> Optional[dict]:
-
-    submission = await get_submission_by_id(submission_id)
-    if not submission:
-        return None
-
-    # Get raw data with fallbacks
-    result_summary = submission.get("result_summary", {})
-    ai_insights = submission.get("ai_insights", {})
-
-    # Build unified evaluation block
-    evaluation = {
-        "ai_score": submission.get("ai_score") or result_summary.get("ai_score"),
-        "final_score": submission.get("final_score"),
-        "max_marks": submission.get("max_marks") or result_summary.get("max_marks"),
-        "passed_tests": submission.get("passed_tests") or result_summary.get("passed"),
-        "total_tests": submission.get("total_tests") or result_summary.get("total"),
-        "accuracy_score": result_summary.get("accuracy_score") or result_summary.get("confidence_score", 0),
-        "status": submission.get("status", "pending"),
-        "result_status": result_summary.get("status", "unknown")
-    }
-
-    # Build unified feedback block
-    feedback = {
-        "ai_feedback": ai_insights.get("feedback") or submission.get("ai_feedback") or result_summary.get("feedback") or "",
-        "teacher_feedback": submission.get("teacher_feedback") or ""
-    }
-
-    # Build unified corrections block
-    corrections = {
-        "code_fix": ai_insights.get("code_fix") or submission.get("code_fix") or {},
-        "suggested_fix": ai_insights.get("suggested_fix") or submission.get("suggested_fix") or {}
-    }
-
-    # Build analysis block with fallbacks
-    analysis = submission.get("analysis") or {
-        "ast": submission.get("ast_analysis"),
-        "code_quality": {},
-        "plagiarism": {
-            "score": submission.get("plagiarism_score", 0),
-            "similar_submission_id": submission.get("similar_submission_id")
-        }
-    }
-
-    # Build issues block with fallbacks
-    issues = submission.get("issues") or {
-        "bugs": submission.get("bugs", []),
-        "test_results": submission.get("test_results", [])
-    }
-
-    # Build review info block
-    review = {
-        "reviewed_by": submission.get("reviewed_by"),
-        "reviewed_at": submission.get("reviewed_at"),
-        "finalized_by": submission.get("finalized_by"),
-        "finalized_at": submission.get("finalized_at"),
-        "review_history": submission.get("review_history", [])
-    }
-
-    return {
-        "submission_id": str(submission["_id"]),
-        "assessment_id": submission.get("assessment_id"),
-        "question_id": submission.get("question_id"),
-        "student_id": submission.get("student_id"),
-        "code": submission.get("code"),
-        "language": submission.get("language"),
-        # Unified structured response
-        "evaluation": evaluation,
-        "feedback": feedback,
-        "corrections": corrections,
-        "analysis": analysis,
-        "issues": issues,
-        "review": review,
-        # Timestamps
-        "submitted_at": submission.get("submitted_at"),
-        "evaluated_at": submission.get("evaluated_at")
+        "submission_id": str(s["_id"]),
+        "assessment_id": s.get("assessment_id"),
+        "question_id": s.get("question_id"),
+        "student_id": s.get("student_id"),
+        "student_name": (student or {}).get("name"),
+        "student_email": (student or {}).get("email"),
+        "code": s.get("code"),
+        "language": s.get("language"),
+        "evaluation": {
+            "ai_score": s.get("ai_score"),
+            "final_score": s.get("final_score"),
+            "max_marks": s.get("max_marks"),
+            "passed_tests": s.get("passed_tests"),
+            "total_tests": s.get("total_tests"),
+            "accuracy_score": summary.get("accuracy_score", 0),
+            "status": s.get("status", "pending"),
+            "result_status": summary.get("status", "unknown"),
+            "error": s.get("evaluation_error"),
+        },
+        "feedback": {"ai_feedback": insights.get("feedback") or summary.get("feedback") or "",
+                     "teacher_feedback": s.get("teacher_feedback") or ""},
+        "corrections": {"code_fix": insights.get("code_fix") or {}, "suggested_fix": insights.get("suggested_fix") or {}},
+        "analysis": s.get("analysis") or {},
+        "issues": s.get("issues") or {"bugs": [], "test_results": []},
+        "review_flags": s.get("review_flags", []),
+        "review": {"reviewed_by": s.get("reviewed_by"), "reviewed_at": s.get("reviewed_at"),
+                   "finalized_by": s.get("finalized_by"), "finalized_at": s.get("finalized_at"),
+                   "review_history": s.get("review_history", [])},
+        "submitted_at": s.get("submitted_at"),
+        "evaluated_at": s.get("evaluated_at"),
     }

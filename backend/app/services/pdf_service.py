@@ -8,7 +8,7 @@ ASSESSMENT REPORT: Per-assessment class report with common mistakes analysis.
 """
 
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from collections import Counter
 
@@ -47,11 +47,8 @@ async def _synthesize_common_issues(feedback_list: list) -> list:
     feedback_text = "\n".join(f"- {fb}" for fb in unique[:20])
     
     try:
-        from google import genai
-        import os
-        
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
+        from app.ai import llm
+
         prompt = f"""You are helping a teacher understand common issues in their students' assignment submissions.
 
 Below are individual AI feedback comments given to students after evaluating their answers:
@@ -67,17 +64,10 @@ Synthesize these into 3-6 bullet points written FOR THE TEACHER (not the student
 
 Return ONLY the bullet points, one per line, no numbering, no dashes, no bullets — just the text of each point on its own line."""
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={"max_output_tokens": 2048, "temperature": 0.3}
-        )
-        
-        text = response.text.strip()
+        text = (await llm.generate_text(prompt, temperature=0.3, max_tokens=2048)).strip()
         lines = [line.strip().lstrip("•-*").strip() for line in text.split("\n") if line.strip()]
         return [line for line in lines if len(line) > 10][:6]
-    except Exception as e:
-        print(f"Gemini synthesis failed: {e}")
+    except Exception:
         # Fallback: just deduplicate and truncate
         return [fb[:250] for fb in unique[:6]]
 
@@ -129,7 +119,7 @@ def _footer(story, styles):
     story.append(Spacer(1, 24))
     story.append(HRFlowable(width="100%", thickness=0.5, color=LIGHT))
     story.append(Paragraph(
-        f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')} — GradeMaster AI",
+        f"Generated on {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')} — GradeMaster AI",
         styles["Small"]
     ))
 
@@ -201,7 +191,7 @@ async def generate_student_report(student_id: str) -> io.BytesIO:
     # Build scored list
     scored = []
     for s in coding_subs:
-        score = s.get("final_score") or s.get("ai_score") or s.get("score") or 0
+        score = s.get("final_score") if s.get("final_score") is not None else (s.get("ai_score") or 0)
         mx = s.get("max_marks") or 1
         aid = s.get("assessment_id", "")
         info = assessment_info.get(aid, {})
@@ -230,7 +220,7 @@ async def generate_student_report(student_id: str) -> io.BytesIO:
         })
     for s in manual_subs:
         manual_eval = s.get("manual_evaluation", {})
-        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        score = s.get("final_score", s.get("teacher_adjusted_score")) if s.get("final_score", s.get("teacher_adjusted_score")) is not None else manual_eval.get("total_score", 0)
         mx = manual_eval.get("total_marks") or 1
         aid = s.get("assessment_id", "")
         info = assessment_info.get(aid, {})
@@ -418,7 +408,7 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
     all_feedback = []
 
     for s in coding_subs:
-        score = s.get("final_score") or s.get("ai_score") or s.get("score") or 0
+        score = s.get("final_score") if s.get("final_score") is not None else (s.get("ai_score") or 0)
         mx = s.get("max_marks") or 1
         pct = round(score / mx * 100, 1) if mx > 0 else 0
         sid_val = s.get("student_id", "")
@@ -449,7 +439,7 @@ async def generate_assessment_report(assessment_id: str) -> io.BytesIO:
 
     for s in manual_subs:
         manual_eval = s.get("manual_evaluation", {})
-        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        score = s.get("final_score", s.get("teacher_adjusted_score")) if s.get("final_score", s.get("teacher_adjusted_score")) is not None else manual_eval.get("total_score", 0)
         mx = manual_eval.get("total_marks") or 1
         pct = round(score / mx * 100, 1) if mx > 0 else 0
         sid_val = s.get("student_id", "")

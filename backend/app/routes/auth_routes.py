@@ -1,110 +1,65 @@
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, status
 
+from app.core.config import settings
+from app.core.deps import get_current_user  # re-exported for legacy imports
+from app.core.security import create_access_token
 from app.schemas.user_schema import (
+    AdminBootstrap,
+    ChangePassword,
+    MessageResponse,
+    TokenResponse,
     UserCreate,
     UserLogin,
     UserResponse,
-    TokenResponse,
-    MessageResponse
 )
+from app.services.audit_service import record_audit
 from app.services.auth_service import (
-    create_user,
     authenticate_user,
-    create_access_token,
-    decode_access_token,
-    get_user_by_id
+    change_password,
+    create_bootstrap_admin,
+    create_user,
+    serialize_user,
 )
 
 router = APIRouter()
-security = HTTPBearer()
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> dict:
-    token = credentials.credentials
-    payload = decode_access_token(token)
-
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = await get_user_by_id(user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
 
 
 @router.post("/signup", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def signup(user_data: UserCreate):
     user = await create_user(user_data)
+    await record_audit(user, "user.signup", "user", str(user["_id"]), {"role": user["role"]})
+    if user.get("is_approved"):
+        return MessageResponse(message="Account created. You can sign in now.")
+    return MessageResponse(message="Account created. An administrator must approve it before you can sign in.")
 
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
 
-    if isinstance(user, dict) and "error" in user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=user["error"]
-        )
-
-    # Return appropriate message based on approval status
-    if user.get("is_approved", False):
-        return MessageResponse(message="User registered successfully.")
-    else:
-        return MessageResponse(message="User registered successfully. Awaiting approval.")
+@router.post("/bootstrap-admin", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def bootstrap_admin(data: AdminBootstrap):
+    """Create the first administrator. Disabled once an admin exists."""
+    user = await create_bootstrap_admin(data)
+    await record_audit(user, "admin.bootstrap", "user", str(user["_id"]))
+    return MessageResponse(message="Administrator account created. You can sign in now.")
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(user_data: UserLogin):
     user = await authenticate_user(user_data.email, user_data.password)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    access_token = create_access_token(
-        user_id=str(user["_id"]),
-        role=user["role"]
-    )
-
+    token = create_access_token(str(user["_id"]), user["role"], int(user.get("token_version", 0)))
     return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
+        access_token=token,
         role=user["role"],
-        user_id=str(user["_id"])
+        user_id=str(user["_id"]),
+        expires_in=settings.access_token_expire_minutes * 60,
     )
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
-    return UserResponse(
-        id=str(current_user["_id"]),
-        name=current_user["name"],
-        email=current_user["email"],
-        role=current_user["role"],
-        approved=current_user.get("is_approved", False)
-    )
+    return UserResponse(**serialize_user(current_user))
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password_route(data: ChangePassword, current_user: dict = Depends(get_current_user)):
+    await change_password(current_user, data.current_password, data.password)
+    await record_audit(current_user, "user.change_password", "user", str(current_user["_id"]))
+    return MessageResponse(message="Password updated. Please sign in again.")

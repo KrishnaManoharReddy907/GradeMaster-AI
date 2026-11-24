@@ -1,626 +1,250 @@
-from fastapi import APIRouter, HTTPException, Depends, status
-from typing import List
-from datetime import datetime
+from typing import Dict, List
 
-from app.routes.auth_routes import get_current_user
+from bson import ObjectId
+from fastapi import APIRouter, Depends, status
+
+from app.core.deps import (
+    load_owned_assessment,
+    load_owned_submission,
+    require_staff,
+    require_student,
+)
+from app.core.errors import NotFound
+from app.database import get_database
 from app.schemas.submission_schema import (
-    MCQSubmissionCreate,
-    MCQSubmissionResponse,
     CodingSubmissionCreate,
     CodingSubmissionResponse,
-    SubmissionStatusResponse
+    ManualTeacherReviewCreate,
+    MCQSubmissionCreate,
+    MCQSubmissionResponse,
 )
+from app.services.assessment_service import get_assessment_by_id
+from app.services.audit_service import record_audit
+from app.services.evaluation_service import queue_assessment_evaluation
+from app.services.review_service import review_manual
 from app.services.submission_service import (
-    submit_mcq,
+    get_student_submission_list,
+    get_student_submission_status,
     submit_coding,
-    get_student_submission_status
-)
-from app.services.evaluation_service import (
-    evaluate_submission,
-    batch_evaluate_assessment,
-    get_submission_result
+    submit_mcq,
 )
 
 router = APIRouter()
 
 
-async def student_required(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("role") != "student":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Student access required"
-        )
-    return current_user
+async def _users_by_id(ids) -> Dict[str, dict]:
+    oids = [ObjectId(i) for i in set(ids) if ObjectId.is_valid(i)]
+    if not oids:
+        return {}
+    rows = await get_database().users.find({"_id": {"$in": oids}}, {"name": 1, "email": 1, "section_id": 1}).to_list(None)
+    return {str(u["_id"]): u for u in rows}
 
 
-async def teacher_or_admin_required(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("role") not in ["teacher", "faculty", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Teacher or Admin access required"
-        )
-    if current_user.get("role") in ["teacher", "faculty"] and not (current_user.get("is_approved") or current_user.get("approved")):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account not approved"
-        )
-    return current_user
-
+# ─── Student ──────────────────────────────────────────────────────────────
 
 @router.post("/student/submit-mcq", response_model=MCQSubmissionResponse, status_code=status.HTTP_201_CREATED)
-async def submit_mcq_route(
-    data: MCQSubmissionCreate,
-    current_user: dict = Depends(student_required)
-):
-    submission = await submit_mcq(current_user, data)
-
-    if isinstance(submission, dict) and "error" in submission:
-        if submission.get("code") == "forbidden":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=submission["error"]
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=submission["error"]
-        )
-
+async def submit_mcq_route(data: MCQSubmissionCreate, student: dict = Depends(require_student)):
+    sub = await submit_mcq(student, data)
+    visible = sub["results_visible"]
     return MCQSubmissionResponse(
-        id=str(submission["_id"]),
-        assessment_id=submission["assessment_id"],
-        student_id=submission["student_id"],
-        score=submission["score"],
-        total_marks=submission["total_marks"],
-        percentage=submission["percentage"],
-        submitted_at=submission["submitted_at"]
-    )
+        id=str(sub["_id"]), assessment_id=sub["assessment_id"], student_id=sub["student_id"],
+        score=sub["score"] if visible else 0, total_marks=sub["total_marks"],
+        percentage=sub["percentage"] if visible else 0, results_visible=visible, submitted_at=sub["submitted_at"])
 
 
 @router.post("/student/submit-coding", response_model=CodingSubmissionResponse, status_code=status.HTTP_201_CREATED)
-async def submit_coding_route(
-    data: CodingSubmissionCreate,
-    current_user: dict = Depends(student_required)
-):
-    submission = await submit_coding(current_user, data)
-
-    if isinstance(submission, dict) and "error" in submission:
-        if submission.get("code") == "forbidden":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=submission["error"]
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=submission["error"]
-        )
-
+async def submit_coding_route(data: CodingSubmissionCreate, student: dict = Depends(require_student)):
+    sub = await submit_coding(student, data)
     return CodingSubmissionResponse(
-        id=str(submission["_id"]),
-        assessment_id=submission["assessment_id"],
-        question_id=submission["question_id"],
-        student_id=submission["student_id"],
-        language=submission["language"],
-        status=submission["status"],
-        score=submission.get("score"),
-        submitted_at=submission["submitted_at"]
-    )
+        id=str(sub["_id"]), assessment_id=sub["assessment_id"], question_id=sub["question_id"],
+        student_id=sub["student_id"], language=sub["language"], status=sub["status"],
+        job_id=sub.get("job_id"), submitted_at=sub["submitted_at"])
 
 
 @router.get("/student/submission-status/{assessment_id}")
-async def get_submission_status_route(
-    assessment_id: str,
-    current_user: dict = Depends(student_required)
-):
-    student_id = str(current_user["_id"])
-    status_data = await get_student_submission_status(student_id, assessment_id)
-    return status_data
+async def get_submission_status_route(assessment_id: str, student: dict = Depends(require_student)):
+    return await get_student_submission_status(str(student["_id"]), assessment_id)
 
 
 @router.get("/student/all-submissions")
-async def get_all_student_submissions_route(
-    current_user: dict = Depends(student_required)
-):
-    """Get all submissions for the current student across all assessments (past & present)."""
-    from app.database import get_database
-    from bson import ObjectId
-    db = get_database()
-
-    student_id = str(current_user["_id"])
-
-    # Fetch all submissions
-    mcq_subs = await db.mcq_submissions.find({"student_id": student_id}).sort("submitted_at", -1).to_list(100)
-    coding_subs = await db.coding_submissions.find({"student_id": student_id}).sort("submitted_at", -1).to_list(100)
-    manual_subs = await db.manual_submissions.find({"student_id": student_id}).sort("submitted_at", -1).to_list(100)
-
-    # Collect unique assessment IDs
-    assessment_ids = set()
-    for s in mcq_subs:
-        assessment_ids.add(s["assessment_id"])
-    for s in coding_subs:
-        assessment_ids.add(s["assessment_id"])
-    for s in manual_subs:
-        assessment_ids.add(s["assessment_id"])
-
-    # Fetch assessment info (title, type) for each
-    assessment_map = {}
-    for aid in assessment_ids:
-        try:
-            a = await db.assessments.find_one({"_id": ObjectId(aid)})
-            if a:
-                assessment_map[aid] = {
-                    "title": a.get("title", "Unknown"),
-                    "assessment_type": a.get("assessment_type", "unknown"),
-                    "total_marks": a.get("total_marks", 0),
-                }
-        except Exception:
-            pass
-
-    results = []
-
-    # MCQ submissions
-    for s in mcq_subs:
-        aid = s["assessment_id"]
-        info = assessment_map.get(aid, {})
-        results.append({
-            "assessmentId": aid,
-            "assessmentTitle": info.get("title", "Unknown Assessment"),
-            "assessmentType": info.get("assessment_type", "mcq"),
-            "submissionType": "mcq",
-            "status": "evaluated",
-            "score": s.get("score"),
-            "total_marks": s.get("total_marks") or info.get("total_marks"),
-            "submitted_at": s.get("submitted_at"),
-        })
-
-    # Coding submissions — group by assessment_id (take first/latest)
-    coding_by_assessment = {}
-    for s in coding_subs:
-        aid = s["assessment_id"]
-        if aid not in coding_by_assessment:
-            coding_by_assessment[aid] = s
-
-    for aid, s in coding_by_assessment.items():
-        info = assessment_map.get(aid, {})
-        results.append({
-            "assessmentId": aid,
-            "assessmentTitle": info.get("title", "Unknown Assessment"),
-            "assessmentType": info.get("assessment_type", "coding"),
-            "submissionType": "coding",
-            "status": s.get("status", "submitted"),
-            "score": s.get("final_score") or s.get("ai_score") or s.get("score"),
-            "total_marks": s.get("max_marks") or info.get("total_marks"),
-            "submitted_at": s.get("submitted_at"),
-        })
-
-    # Manual submissions
-    for s in manual_subs:
-        aid = s["assessment_id"]
-        info = assessment_map.get(aid, {})
-        manual_eval = s.get("manual_evaluation", {})
-        manual_status = s.get("status", "evaluated")
-        results.append({
-            "assessmentId": aid,
-            "assessmentTitle": info.get("title", "Unknown Assessment"),
-            "assessmentType": info.get("assessment_type", "manual"),
-            "submissionType": "manual",
-            "status": manual_status,
-            "score": s.get("teacher_adjusted_score") if manual_status == "finalized" else None,
-            "total_marks": manual_eval.get("total_marks") or info.get("total_marks"),
-            "submitted_at": s.get("submitted_at"),
-        })
-
-    # Sort by submitted_at descending
-    results.sort(key=lambda x: x.get("submitted_at") or "", reverse=True)
-
-    return {"submissions": results}
+async def get_all_student_submissions_route(student: dict = Depends(require_student)):
+    return {"submissions": await get_student_submission_list(str(student["_id"]))}
 
 
 @router.get("/student/manual-submission-detail/{assessment_id}")
-async def get_student_manual_submission_detail(
-    assessment_id: str,
-    current_user: dict = Depends(student_required)
-):
-    """Get detailed manual submission results for a student (after teacher review)."""
-    from app.database import get_database
-    from bson import ObjectId
-    db = get_database()
-
-    student_id = str(current_user["_id"])
-
-    sub = await db.manual_submissions.find_one({
-        "assessment_id": assessment_id,
-        "student_id": student_id
-    })
+async def get_student_manual_submission_detail(assessment_id: str, student: dict = Depends(require_student)):
+    sub = await get_database().manual_submissions.find_one(
+        {"assessment_id": assessment_id, "student_id": str(student["_id"])})
     if not sub:
-        raise HTTPException(status_code=404, detail="No manual submission found")
-
-    manual_eval = sub.get("manual_evaluation", {})
-    manual_status = sub.get("status", "evaluated")
-
-    # Build per-question results (strip model answers — student shouldn't see them)
-    question_results = []
-    for r in manual_eval.get("results", []):
-        question_results.append({
-            "question_id": r.get("question_id"),
-            "question_text": r.get("question_text", ""),
-            "student_answer": sub.get("student_answers", {}).get(r.get("question_id", ""), ""),
-            "final_score": r.get("final_score", 0),
-            "max_marks": r.get("max_marks", 0),
-            "feedback": r.get("feedback", ""),
-            "correctness": r.get("correctness"),
-            "completeness": r.get("completeness"),
-            "keywords_matched": r.get("keywords_matched", []),
-            "keywords_missed": r.get("keywords_missed", []),
-        })
-
-    # Use teacher adjusted score if reviewed
-    final_score = manual_eval.get("total_score", 0)
-    if manual_status == "finalized" and sub.get("teacher_adjusted_score") is not None:
-        final_score = sub.get("teacher_adjusted_score")
-
+        raise NotFound("No handwritten submission found")
+    evaluation = sub.get("manual_evaluation") or {}
+    final = sub.get("status") == "finalized"
+    assessment = await get_assessment_by_id(assessment_id)
+    qtext = {q.get("question_id"): q.get("question_text", "") for q in (assessment or {}).get("manual_questions", [])}
     return {
-        "status": manual_status,
-        "total_score": manual_eval.get("total_score", 0),
-        "total_marks": manual_eval.get("total_marks", 0),
-        "percentage": manual_eval.get("percentage", 0),
-        "final_score": final_score,
-        "teacher_adjusted_score": sub.get("teacher_adjusted_score"),
-        "teacher_feedback": sub.get("teacher_feedback", ""),
-        "question_results": question_results,
+        "status": sub.get("status", "evaluated"),
         "submitted_at": sub.get("submitted_at"),
-        "evaluated_at": sub.get("evaluated_at"),
-        "reviewed_at": sub.get("reviewed_at"),
+        "reviewed_at": sub.get("reviewed_at") if final else None,
+        "total_marks": evaluation.get("total_marks", 0),
+        "final_score": sub.get("final_score", sub.get("teacher_adjusted_score")) if final else None,
+        "percentage": sub.get("final_percentage") if final else None,
+        "teacher_feedback": sub.get("teacher_feedback", "") if final else "",
+        "question_results": [{
+            "question_id": r.get("question_id"),
+            "question_text": qtext.get(r.get("question_id"), ""),
+            "student_answer": (sub.get("student_answers") or {}).get(r.get("question_id", ""), ""),
+            "score": r.get("teacher_score", r.get("final_score")) if final else None,
+            "max_marks": r.get("max_marks", 0),
+            "feedback": r.get("feedback", "") if final else "",
+            "teacher_comment": r.get("teacher_comment") if final else None,
+            "criteria": [{"criterion": c.get("criterion"), "awarded": c.get("awarded"), "marks": c.get("marks"),
+                          "comment": c.get("comment")} for c in r.get("criteria", [])] if final else [],
+            "keywords_matched": r.get("keywords_matched", []) if final else [],
+            "keywords_missed": r.get("keywords_missed", []) if final else [],
+        } for r in evaluation.get("results", [])],
     }
 
 
+# ─── Teacher ──────────────────────────────────────────────────────────────
+
 @router.post("/teacher/evaluate/{submission_id}")
-async def evaluate_submission_route(
-    submission_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    evaluator_id = str(current_user["_id"])
-    result = await evaluate_submission(submission_id, evaluator_id)
+async def evaluate_submission_route(submission_id: str, teacher: dict = Depends(require_staff)):
+    from app.jobs.worker import enqueue, serialize_job
 
-    if isinstance(result, dict) and "error" in result:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result["error"]
-        )
-
-    return result
+    sub, _ = await load_owned_submission("coding_submissions", submission_id, teacher)
+    job = await enqueue("evaluate_coding", str(sub["_id"]), created_by=str(teacher["_id"]))
+    return {"message": "Evaluation queued", "job": serialize_job(job)}
 
 
 @router.post("/teacher/evaluate-assessment/{assessment_id}")
-async def batch_evaluate_assessment_route(
-    assessment_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    evaluator_id = str(current_user["_id"])
-    result = await batch_evaluate_assessment(assessment_id, evaluator_id)
+async def batch_evaluate_assessment_route(assessment_id: str, teacher: dict = Depends(require_staff)):
+    await load_owned_assessment(assessment_id, teacher)
+    result = await queue_assessment_evaluation(assessment_id, str(teacher["_id"]))
+    await record_audit(teacher, "coding.evaluate_batch", "assessment", assessment_id, {"queued": result["queued"]})
     return result
-
-
-@router.get("/teacher/submission/{submission_id}")
-async def get_submission_detail_route(
-    submission_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    result = await get_submission_result(submission_id)
-
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Submission not found"
-        )
-
-    return result
-
-
-@router.get("/student/submission/{submission_id}")
-async def get_student_submission_detail_route(
-    submission_id: str,
-    current_user: dict = Depends(student_required)
-):
-    student_id = str(current_user["_id"])
-    result = await get_submission_result(submission_id)
-
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Submission not found"
-        )
-
-    if result["student_id"] != student_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view your own submissions"
-        )
-
-    if result.get("test_results"):
-        result["test_results"] = [
-            {k: v for k, v in tr.items() if not tr.get("is_hidden") or k in ["test_case_index", "passed", "is_hidden"]}
-            for tr in result["test_results"]
-        ]
-
-    return result
-
-
-@router.get("/teacher/mcq-submission/{submission_id}")
-async def get_mcq_submission_detail(
-    submission_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    """Get full MCQ submission details for teacher (read-only view)."""
-    from app.database import get_database
-    from app.services.assessment_service import get_assessment_by_id
-    from bson import ObjectId
-    db = get_database()
-
-    try:
-        sub = await db.mcq_submissions.find_one({"_id": ObjectId(submission_id)})
-    except Exception as e:
-        print(f"MCQ submission lookup error: {e}")
-        raise HTTPException(status_code=400, detail="Invalid submission ID")
-
-    if not sub:
-        raise HTTPException(status_code=404, detail="MCQ submission not found")
-
-    # Get student info
-    student = None
-    try:
-        student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
-    except Exception:
-        pass
-
-    # Get assessment for question details
-    assessment = await get_assessment_by_id(sub["assessment_id"])
-    mcq_questions = []
-    if assessment:
-        for q in assessment.get("mcq_questions", []):
-            mcq_questions.append({
-                "question_id": q.get("question_id"),
-                "question_text": q.get("question_text", ""),
-                "options": q.get("options", []),
-                "correct_option_id": q.get("correct_option_id"),
-                "marks": q.get("marks", 1),
-                "difficulty": q.get("difficulty", "medium"),
-            })
-
-    return {
-        "id": str(sub["_id"]),
-        "assessment_id": sub["assessment_id"],
-        "assessment_title": assessment.get("title", "Unknown") if assessment else "Unknown",
-        "student_id": sub["student_id"],
-        "student_name": student.get("name", "Unknown") if student else "Unknown",
-        "student_email": student.get("email", "") if student else "",
-        "score": sub.get("score"),
-        "total_marks": sub.get("total_marks"),
-        "percentage": sub.get("percentage"),
-        "results": sub.get("results", []),
-        "mcq_questions": mcq_questions,
-        "submitted_at": sub.get("submitted_at"),
-    }
 
 
 @router.get("/teacher/submissions/assessment/{assessment_id}")
-async def get_assessment_submissions_route(
-    assessment_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    """Get all submissions (MCQ + Coding) for a given assessment."""
-    from app.database import get_database
-    from bson import ObjectId
+async def get_assessment_submissions_route(assessment_id: str, teacher: dict = Depends(require_staff)):
+    await load_owned_assessment(assessment_id, teacher)
     db = get_database()
+    mcq = await db.mcq_submissions.find({"assessment_id": assessment_id}).sort("submitted_at", -1).to_list(5000)
+    coding = await db.coding_submissions.find({"assessment_id": assessment_id},
+                                              {"code": 0, "issues": 0, "code_embedding": 0}).sort("submitted_at", -1).to_list(5000)
+    manual = await db.manual_submissions.find({"assessment_id": assessment_id}).sort("submitted_at", -1).to_list(5000)
+    users = await _users_by_id(s["student_id"] for s in mcq + coding + manual)
 
-    submissions = []
+    def base(s, kind):
+        u = users.get(s["student_id"], {})
+        return {"id": str(s["_id"]), "type": kind, "student_id": s["student_id"],
+                "student_name": u.get("name", "Unknown"), "student_email": u.get("email", ""),
+                "assessment_id": assessment_id, "submitted_at": s.get("submitted_at"),
+                "review_flags": s.get("review_flags", [])}
 
-    # Get MCQ submissions
-    mcq_subs = await db.mcq_submissions.find(
-        {"assessment_id": assessment_id}
-    ).sort("submitted_at", -1).to_list(length=500)
-
-    for sub in mcq_subs:
-        # Try to get student info
-        student = None
-        try:
-            student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
-        except Exception:
-            pass
-
-        submissions.append({
-            "id": str(sub["_id"]),
-            "type": "mcq",
-            "student_id": sub["student_id"],
-            "student_name": student.get("name", "Unknown") if student else "Unknown",
-            "student_email": student.get("email", "") if student else "",
-            "assessment_id": sub["assessment_id"],
-            "status": "evaluated",
-            "score": sub.get("score"),
-            "total_marks": sub.get("total_marks"),
-            "percentage": sub.get("percentage"),
-            "submitted_at": sub.get("submitted_at"),
-        })
-
-    # Get Coding submissions
-    coding_subs = await db.coding_submissions.find(
-        {"assessment_id": assessment_id}
-    ).sort("submitted_at", -1).to_list(length=500)
-
-    for sub in coding_subs:
-        student = None
-        try:
-            student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
-        except Exception:
-            pass
-
-        submissions.append({
-            "id": str(sub["_id"]),
-            "type": "coding",
-            "student_id": sub["student_id"],
-            "student_name": student.get("name", "Unknown") if student else "Unknown",
-            "student_email": student.get("email", "") if student else "",
-            "assessment_id": sub["assessment_id"],
-            "question_id": sub.get("question_id"),
-            "language": sub.get("language"),
-            "status": sub.get("status", "pending"),
-            "ai_score": sub.get("ai_score"),
-            "final_score": sub.get("final_score"),
-            "score": sub.get("score"),
-            "max_marks": sub.get("max_marks"),
-            "submitted_at": sub.get("submitted_at"),
-        })
-
-    # Get Manual (handwritten) submissions
-    manual_subs = await db.manual_submissions.find(
-        {"assessment_id": assessment_id}
-    ).sort("submitted_at", -1).to_list(length=500)
-
-    for sub in manual_subs:
-        student = None
-        try:
-            student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
-        except Exception:
-            pass
-
-        evaluation = sub.get("manual_evaluation", {})
-        manual_status = sub.get("status", "evaluated")
-        # Use teacher adjusted score if finalized
-        if manual_status == "finalized" and sub.get("teacher_adjusted_score") is not None:
-            display_score = sub.get("teacher_adjusted_score")
-        else:
-            display_score = evaluation.get("total_score")
-
-        submissions.append({
-            "id": str(sub["_id"]),
-            "type": "manual",
-            "student_id": sub["student_id"],
-            "student_name": student.get("name", "Unknown") if student else "Unknown",
-            "student_email": student.get("email", "") if student else "",
-            "assessment_id": sub["assessment_id"],
-            "status": manual_status,
-            "score": display_score,
-            "total_marks": evaluation.get("total_marks"),
-            "percentage": round(display_score / evaluation.get("total_marks", 1) * 100, 1) if display_score is not None and evaluation.get("total_marks") else evaluation.get("percentage"),
-            "submitted_at": sub.get("submitted_at"),
-        })
-
-    return {"submissions": submissions, "total": len(submissions)}
+    rows: List[dict] = []
+    for s in mcq:
+        rows.append(base(s, "mcq") | {"status": "evaluated", "score": s.get("score"),
+                                      "total_marks": s.get("total_marks"), "percentage": s.get("percentage")})
+    for s in coding:
+        rows.append(base(s, "coding") | {
+            "question_id": s.get("question_id"), "language": s.get("language"), "status": s.get("status", "pending"),
+            "ai_score": s.get("ai_score"), "final_score": s.get("final_score"), "max_marks": s.get("max_marks"),
+            "score": s.get("final_score") if s.get("final_score") is not None else s.get("ai_score"),
+            "plagiarism": ((s.get("analysis") or {}).get("plagiarism") or {}).get("score"),
+            "error": s.get("evaluation_error")})
+    for s in manual:
+        ev = s.get("manual_evaluation") or {}
+        score = s.get("final_score", s.get("teacher_adjusted_score")) if s.get("status") == "finalized" else ev.get("total_score")
+        total = ev.get("total_marks") or 0
+        rows.append(base(s, "manual") | {"status": s.get("status", "evaluated"), "score": score,
+                                         "ai_score": ev.get("total_score"), "total_marks": total,
+                                         "percentage": round(score / total * 100, 1) if score is not None and total else None,
+                                         "ocr_confidence": (s.get("ocr") or {}).get("avg_confidence")})
+    return {"submissions": rows, "total": len(rows)}
 
 
 @router.get("/teacher/assessment-stats")
-async def get_assessment_stats_route(
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    """Get submission counts for all of the teacher's assessments."""
-    from app.database import get_database
+async def get_assessment_stats_route(teacher: dict = Depends(require_staff)):
     db = get_database()
+    query = {} if teacher.get("role") == "admin" else {"teacher_id": str(teacher["_id"])}
+    ids = [str(a["_id"]) for a in await db.assessments.find(query, {"_id": 1}).to_list(5000)]
+    stats = {aid: {"submissions_count": 0, "pending_count": 0, "reviewed_count": 0, "flagged_count": 0} for aid in ids}
 
-    teacher_id = str(current_user["_id"])
+    async def tally(collection: str, done_statuses: set | None):
+        """done_statuses=None means every submission is already graded (MCQ)."""
+        pipeline = [{"$match": {"assessment_id": {"$in": ids}}},
+                    {"$group": {"_id": {"a": "$assessment_id", "s": "$status"}, "n": {"$sum": 1},
+                                "flagged": {"$sum": {"$cond": [{"$gt": [{"$size": {"$ifNull": ["$review_flags", []]}}, 0]}, 1, 0]}}}}]
+        async for row in db[collection].aggregate(pipeline):
+            st = stats.get(row["_id"]["a"])
+            if st is None:
+                continue
+            st["submissions_count"] += row["n"]
+            st["flagged_count"] += row["flagged"]
+            if done_statuses is None or row["_id"].get("s") in done_statuses:
+                st["reviewed_count"] += row["n"]
+            else:
+                st["pending_count"] += row["n"]
 
-    # Get all assessments by this teacher
-    assessments = await db.assessments.find(
-        {"teacher_id": teacher_id}
-    ).to_list(length=500)
-
-    stats = {}
-    for assessment in assessments:
-        aid = str(assessment["_id"])
-
-        mcq_count = await db.mcq_submissions.count_documents({"assessment_id": aid})
-        coding_count = await db.coding_submissions.count_documents({"assessment_id": aid})
-        manual_count = await db.manual_submissions.count_documents({"assessment_id": aid})
-
-        pending_count = await db.coding_submissions.count_documents(
-            {"assessment_id": aid, "status": "pending"}
-        )
-        # Manual submissions awaiting teacher review
-        manual_pending = await db.manual_submissions.count_documents(
-            {"assessment_id": aid, "status": {"$nin": ["finalized"]}}
-        )
-        manual_reviewed = await db.manual_submissions.count_documents(
-            {"assessment_id": aid, "status": "finalized"}
-        )
-        reviewed_count = await db.coding_submissions.count_documents(
-            {"assessment_id": aid, "status": {"$in": ["reviewed", "finalized"]}}
-        )
-
-        stats[aid] = {
-            "submissions_count": mcq_count + coding_count + manual_count,
-            "pending_count": pending_count + manual_pending,
-            "reviewed_count": reviewed_count + mcq_count + manual_reviewed,  # MCQ auto-evaluated
-        }
-
+    await tally("mcq_submissions", None)
+    await tally("coding_submissions", {"reviewed", "finalized"})
+    await tally("manual_submissions", {"finalized"})
     return stats
 
 
-@router.get("/teacher/manual-submission/{submission_id}")
-async def get_manual_submission_detail(
-    submission_id: str,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    """Get detailed manual submission for teacher review."""
-    from app.database import get_database
-    from bson import ObjectId
-    db = get_database()
-
-    sub = await db.manual_submissions.find_one({"_id": ObjectId(submission_id)})
-    if not sub:
-        raise HTTPException(status_code=404, detail="Submission not found")
-
-    student = None
-    try:
-        student = await db.users.find_one({"_id": ObjectId(sub["student_id"])})
-    except Exception:
-        pass
-
-    evaluation = sub.get("manual_evaluation", {})
+@router.get("/teacher/mcq-submission/{submission_id}")
+async def get_mcq_submission_detail(submission_id: str, teacher: dict = Depends(require_staff)):
+    sub, assessment = await load_owned_submission("mcq_submissions", submission_id, teacher)
+    student = (await _users_by_id([sub["student_id"]])).get(sub["student_id"], {})
     return {
-        "id": str(sub["_id"]),
-        "student_id": sub["student_id"],
-        "student_name": student.get("name", "Unknown") if student else "Unknown",
-        "student_email": student.get("email", "") if student else "",
-        "assessment_id": sub["assessment_id"],
-        "student_answers": sub.get("student_answers", {}),
-        "status": sub.get("status", "evaluated"),
-        "total_score": evaluation.get("total_score", 0),
-        "total_marks": evaluation.get("total_marks", 0),
-        "percentage": evaluation.get("percentage", 0),
-        "results": evaluation.get("results", []),
+        "id": str(sub["_id"]), "assessment_id": sub["assessment_id"], "assessment_title": assessment.get("title"),
+        "student_id": sub["student_id"], "student_name": student.get("name", "Unknown"),
+        "student_email": student.get("email", ""), "score": sub.get("score"), "total_marks": sub.get("total_marks"),
+        "percentage": sub.get("percentage"), "results": sub.get("results", []),
+        "mcq_questions": [{"question_id": q.get("question_id"), "question_text": q.get("question_text", ""),
+                           "options": q.get("options", []), "correct_option_id": q.get("correct_option_id"),
+                           "marks": q.get("marks", 1), "difficulty": q.get("difficulty", "medium"),
+                           "topic": q.get("topic")} for q in assessment.get("mcq_questions", [])],
         "submitted_at": sub.get("submitted_at"),
-        "evaluated_at": sub.get("evaluated_at"),
-        "teacher_adjusted_score": sub.get("teacher_adjusted_score"),
-        "teacher_feedback": sub.get("teacher_feedback"),
-        "reviewed_by": sub.get("reviewed_by"),
-        "reviewed_at": sub.get("reviewed_at"),
     }
+
+
+def _manual_detail(sub: dict, assessment: dict, student: dict) -> dict:
+    ev = sub.get("manual_evaluation") or {}
+    questions = {q.get("question_id"): q for q in assessment.get("manual_questions", [])}
+    return {
+        "id": str(sub["_id"]), "student_id": sub["student_id"], "student_name": student.get("name", "Unknown"),
+        "student_email": student.get("email", ""), "assessment_id": sub["assessment_id"],
+        "assessment_title": assessment.get("title"), "student_answers": sub.get("student_answers", {}),
+        "status": sub.get("status", "evaluated"), "total_score": ev.get("total_score", 0),
+        "total_marks": ev.get("total_marks", 0), "percentage": ev.get("percentage", 0),
+        "results": [r | {"question_text": questions.get(r.get("question_id"), {}).get("question_text", ""),
+                         "model_answer": questions.get(r.get("question_id"), {}).get("model_answer", "")}
+                    for r in ev.get("results", [])],
+        "review_flags": sub.get("review_flags", []),
+        "ocr": sub.get("ocr"), "uploads": sub.get("uploads", []),
+        "submitted_at": sub.get("submitted_at"), "evaluated_at": sub.get("evaluated_at"),
+        "final_score": sub.get("final_score", sub.get("teacher_adjusted_score")),
+        "teacher_adjusted_score": sub.get("teacher_adjusted_score"),
+        "teacher_feedback": sub.get("teacher_feedback"), "reviewed_by": sub.get("reviewed_by"),
+        "reviewed_at": sub.get("reviewed_at"), "review_history": sub.get("review_history", []),
+    }
+
+
+@router.get("/teacher/manual-submission/{submission_id}")
+async def get_manual_submission_detail(submission_id: str, teacher: dict = Depends(require_staff)):
+    sub, assessment = await load_owned_submission("manual_submissions", submission_id, teacher)
+    student = (await _users_by_id([sub["student_id"]])).get(sub["student_id"], {})
+    return _manual_detail(sub, assessment, student)
 
 
 @router.put("/teacher/manual-submission/{submission_id}/review")
-async def review_manual_submission(
-    submission_id: str,
-    review: dict,
-    current_user: dict = Depends(teacher_or_admin_required)
-):
-    """Teacher adjusts score and adds feedback to a manual submission."""
-    from app.database import get_database
-    from bson import ObjectId
-    db = get_database()
-
-    sub = await db.manual_submissions.find_one({"_id": ObjectId(submission_id)})
-    if not sub:
-        raise HTTPException(status_code=404, detail="Submission not found")
-
-    update_data = {
-        "status": "finalized",
-        "teacher_adjusted_score": review.get("teacher_adjusted_score"),
-        "teacher_feedback": review.get("teacher_feedback", ""),
-        "reviewed_by": str(current_user["_id"]),
-        "reviewed_at": datetime.utcnow(),
-    }
-
-    await db.manual_submissions.update_one(
-        {"_id": ObjectId(submission_id)},
-        {"$set": update_data}
-    )
-
-    return {"message": "Review submitted successfully", "status": "finalized"}
+async def review_manual_submission(submission_id: str, review: ManualTeacherReviewCreate,
+                                   teacher: dict = Depends(require_staff)):
+    sub, assessment = await load_owned_submission("manual_submissions", submission_id, teacher)
+    updated = await review_manual(sub, str(teacher["_id"]), review.question_scores, review.teacher_adjusted_score,
+                                  review.teacher_feedback, review.finalize)
+    await record_audit(teacher, "manual.finalize" if review.finalize else "manual.review", "manual_submission",
+                       submission_id, {"final_score": updated.get("final_score")})
+    student = (await _users_by_id([updated["student_id"]])).get(updated["student_id"], {})
+    return {"message": "Review saved", "status": updated["status"], "submission": _manual_detail(updated, assessment, student)}

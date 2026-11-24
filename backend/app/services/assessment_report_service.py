@@ -13,34 +13,17 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from collections import Counter
 
-from google import genai
-from google.genai import types
-from dotenv import load_dotenv
-
+from app.ai import llm
 from app.database import get_database
-
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.5-flash"
 
 
 async def _get_ai_recommendation(prompt: str) -> str:
     """Get AI-generated teaching recommendation using Gemini."""
     try:
-        response = ai_client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=2000,
-            )
-        )
-        return response.text.strip()
-    except Exception as e:
-        print(f"AI recommendation failed: {e}")
-        return "Unable to generate AI recommendation at this time."
+        return (await llm.generate_text(prompt, system="You are an experienced teaching coach. Be specific and practical.",
+                                        temperature=0.4, max_tokens=2000)).strip()
+    except llm.LLMUnavailable:
+        return "AI recommendations are unavailable right now. Use the question-level statistics above, or regenerate later."
 
 
 async def get_or_generate_report(assessment_id: str, teacher_id: str, force_regenerate: bool = False) -> dict:
@@ -109,14 +92,14 @@ async def _generate_assessment_report_data(assessment_id: str, teacher_id: str) 
         if year:
             eligible_count = await db.users.count_documents({
                 "role": "student",
-                "section": {"$in": section_ids},
+                "section_id": {"$in": section_ids},
                 "year": year
             })
         # Fallback without year
         if eligible_count == 0:
             eligible_count = await db.users.count_documents({
                 "role": "student",
-                "section": {"$in": section_ids}
+                "section_id": {"$in": section_ids}
             })
 
     # 3. Fetch submissions
@@ -156,7 +139,7 @@ async def _generate_assessment_report_data(assessment_id: str, teacher_id: str) 
             coding_by_student[sid] = s
 
     for sid, s in coding_by_student.items():
-        score = s.get("final_score") or s.get("ai_score") or s.get("score") or 0
+        score = s.get("final_score") if s.get("final_score") is not None else (s.get("ai_score") or 0)
         max_m = s.get("max_marks") or total_marks or 1
         pct = round((score / max_m * 100), 1) if max_m > 0 else 0
         scores.append(pct)
@@ -165,7 +148,7 @@ async def _generate_assessment_report_data(assessment_id: str, teacher_id: str) 
     # Manual scores (only finalized reach here)
     for s in manual_subs:
         manual_eval = s.get("manual_evaluation", {})
-        score = s.get("teacher_adjusted_score") if s.get("teacher_adjusted_score") is not None else manual_eval.get("total_score", 0)
+        score = s.get("final_score", s.get("teacher_adjusted_score")) if s.get("final_score", s.get("teacher_adjusted_score")) is not None else manual_eval.get("total_score", 0)
         max_m = manual_eval.get("total_marks") or total_marks or 1
         pct = round((score / max_m * 100), 1) if max_m > 0 else 0
         sid = s.get("student_id", "")
@@ -469,7 +452,7 @@ async def _compute_manual_insights(assessment, manual_subs):
         for r in results:
             qid = r.get("question_id", "unknown")
             q_text = r.get("question_text", "")
-            final_score = r.get("final_score", 0)
+            final_score = r.get("teacher_score", r.get("final_score", 0))
             max_marks = r.get("max_marks", 1)
 
             if qid not in per_question_scores:

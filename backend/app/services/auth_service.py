@@ -1,188 +1,178 @@
-import os
-from datetime import datetime, timedelta
-from typing import Optional
-from jose import JWTError, jwt
-import bcrypt
-from bson import ObjectId
+"""User accounts: creation, authentication, academic resolution."""
 
+from datetime import datetime, timezone
+from typing import Optional
+
+from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import DuplicateKeyError
+
+from app.core.errors import BadRequest, Conflict, Forbidden, Unauthorized
+from app.core.security import hash_password, verify_password
 from app.database import get_database
 
-SECRET_KEY = os.getenv("JWT_SECRET", "supersecret")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+# Re-exported for older imports.
+from app.core.security import create_access_token, decode_access_token  # noqa: F401
 
 
-def hash_password(password: str) -> str:
-    password_bytes = password.encode("utf-8")
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password_bytes, salt)
-    return hashed.decode("utf-8")
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    password_bytes = plain_password.encode("utf-8")
-    hashed_bytes = hashed_password.encode("utf-8")
-    return bcrypt.checkpw(password_bytes, hashed_bytes)
-
-
-def create_access_token(user_id: str, role: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode = {
-        "sub": user_id,
-        "role": role,
-        "exp": expire
+def serialize_user(user: dict) -> dict:
+    return {
+        "id": str(user["_id"]),
+        "name": user.get("name", ""),
+        "email": user.get("email", ""),
+        "role": user.get("role", ""),
+        "approved": bool(user.get("is_approved", False)),
+        "is_active": user.get("is_active", True),
+        "department_id": user.get("department_id"),
+        "year": user.get("year"),
+        "section_id": user.get("section_id"),
     }
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-
-def decode_access_token(token: str) -> Optional[dict]:
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        return None
 
 
 async def get_user_by_email(email: str) -> Optional[dict]:
-    db = get_database()
-    user = await db.users.find_one({"email": email})
-    return user
+    return await get_database().users.find_one({"email": email.strip().lower()})
 
 
 async def get_user_by_id(user_id: str) -> Optional[dict]:
-    db = get_database()
     try:
-        user = await db.users.find_one({"_id": ObjectId(user_id)})
-        return user
-    except Exception:
+        return await get_database().users.find_one({"_id": ObjectId(user_id)})
+    except (InvalidId, TypeError):
         return None
 
 
-async def resolve_department_id(department_id: Optional[str], department_name: Optional[str]) -> dict:
-    """Resolve department to ObjectId string. Returns dict with 'id' or 'error'."""
+async def resolve_department_id(department_id: Optional[str], department_name: Optional[str]) -> Optional[str]:
     db = get_database()
-
     if department_id:
         try:
             dept = await db.departments.find_one({"_id": ObjectId(department_id)})
-            if dept:
-                return {"id": str(dept["_id"])}
-            return {"error": "Department not found"}
-        except Exception:
-            return {"error": "Invalid department ID format"}
-
+        except (InvalidId, TypeError):
+            raise BadRequest("Invalid department")
+        if not dept:
+            raise BadRequest("Department not found")
+        return str(dept["_id"])
     if department_name:
-        dept = await db.departments.find_one({"name": department_name})
-        if dept:
-            return {"id": str(dept["_id"])}
-        return {"error": f"Department '{department_name}' not found"}
+        dept = await db.departments.find_one({"name": department_name.strip()})
+        if not dept:
+            raise BadRequest(f"Department '{department_name}' not found")
+        return str(dept["_id"])
+    return None
 
-    return {"id": None}
 
-
-async def resolve_section_id(
-    section_id: Optional[str],
-    section_name: Optional[str],
-    year: Optional[int],
-    department_id: Optional[str]
-) -> dict:
-    """Resolve section to ObjectId string. Returns dict with 'id' or 'error'."""
+async def resolve_section_id(section_id: Optional[str], section_name: Optional[str],
+                             year: Optional[int], department_id: Optional[str]) -> Optional[str]:
     db = get_database()
-
     if section_id:
         try:
             section = await db.sections.find_one({"_id": ObjectId(section_id)})
-            if section:
-                return {"id": str(section["_id"])}
-            return {"error": "Section not found"}
-        except Exception:
-            return {"error": "Invalid section ID format"}
-
+        except (InvalidId, TypeError):
+            raise BadRequest("Invalid section")
+        if not section:
+            raise BadRequest("Section not found")
+        if year and section.get("year") != year:
+            raise BadRequest("Section does not belong to the selected year")
+        if department_id and section.get("department_id") != department_id:
+            raise BadRequest("Section does not belong to the selected department")
+        return str(section["_id"])
     if section_name:
-        query = {"name": section_name}
+        query: dict = {"name": section_name.strip()}
         if year:
             query["year"] = year
         if department_id:
             query["department_id"] = department_id
-
         section = await db.sections.find_one(query)
-        if section:
-            return {"id": str(section["_id"])}
+        if not section:
+            raise BadRequest(f"Section '{section_name}' not found for the selected year and department")
+        return str(section["_id"])
+    return None
 
-        if year and department_id:
-            return {"error": f"Section '{section_name}' not found for year {year}"}
-        return {"error": f"Section '{section_name}' not found"}
 
-    return {"id": None}
+async def _insert_user(doc: dict) -> dict:
+    try:
+        result = await get_database().users.insert_one(doc)
+    except DuplicateKeyError:
+        raise Conflict("An account with this email already exists")
+    doc["_id"] = result.inserted_id
+    return doc
 
 
 async def create_user(user_data) -> dict:
-    db = get_database()
+    """Public self-signup (student or faculty). Faculty need admin approval."""
+    if await get_user_by_email(user_data.email):
+        raise Conflict("An account with this email already exists")
 
-    existing_user = await get_user_by_email(user_data.email)
-    if existing_user:
-        return None
-
-    hashed_password = hash_password(user_data.password)
-    role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
-
-    # Single admin enforcement
-    if role == "admin":
-        existing_admin = await db.users.find_one({"role": "admin"})
-        if existing_admin:
-            return {"error": "admin_exists"}
-
-    # Resolve department_id
-    dept_result = await resolve_department_id(
-        getattr(user_data, 'department_id', None),
-        getattr(user_data, 'department_name', None)
-    )
-    if "error" in dept_result:
-        return dept_result
-    resolved_department_id = dept_result["id"]
-
-    # Resolve section_id (for students)
-    resolved_section_id = None
+    role = user_data.role.value
+    department_id = await resolve_department_id(user_data.department_id, user_data.department_name)
+    section_id = None
     if role == "student":
-        section_result = await resolve_section_id(
-            getattr(user_data, 'section_id', None),
-            getattr(user_data, 'section_name', None),
-            getattr(user_data, 'year', None),
-            resolved_department_id
+        section_id = await resolve_section_id(
+            user_data.section_id, user_data.section_name, user_data.year, department_id
         )
-        if "error" in section_result:
-            return section_result
-        resolved_section_id = section_result["id"]
 
-    # Set is_approved based on role
-    if role in ("teacher", "faculty"):
-        is_approved = False
-    else:
-        is_approved = True  # admin and student are auto-approved
-
-    user_dict = {
+    now = _now()
+    return await _insert_user({
         "name": user_data.name,
         "email": user_data.email,
-        "password": hashed_password,
+        "password": hash_password(user_data.password),
         "role": role,
-        "department_id": resolved_department_id,
-        "year": user_data.year,
-        "section_id": resolved_section_id,
-        "is_approved": is_approved,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
-    }
-
-    result = await db.users.insert_one(user_dict)
-    user_dict["_id"] = result.inserted_id
-    return user_dict
+        "department_id": department_id,
+        "year": user_data.year if role == "student" else None,
+        "section_id": section_id,
+        "is_approved": role == "student",
+        "is_active": True,
+        "token_version": 0,
+        "created_at": now,
+        "updated_at": now,
+    })
 
 
-async def authenticate_user(email: str, password: str) -> Optional[dict]:
+async def create_bootstrap_admin(data) -> dict:
+    db = get_database()
+    if await db.users.find_one({"role": "admin"}):
+        raise Forbidden("An administrator already exists. Please sign in.")
+    now = _now()
+    return await _insert_user({
+        "name": data.name, "email": data.email, "password": hash_password(data.password),
+        "role": "admin", "department_id": None, "year": None, "section_id": None,
+        "is_approved": True, "is_active": True, "token_version": 0,
+        "created_at": now, "updated_at": now,
+    })
+
+
+async def create_staff_user(data, created_by: str) -> dict:
+    if await get_user_by_email(data.email):
+        raise Conflict("An account with this email already exists")
+    department_id = await resolve_department_id(data.department_id, None)
+    now = _now()
+    return await _insert_user({
+        "name": data.name, "email": data.email, "password": hash_password(data.password),
+        "role": data.role.value, "department_id": department_id, "year": None, "section_id": None,
+        "is_approved": True, "is_active": True, "token_version": 0,
+        "created_by": created_by, "created_at": now, "updated_at": now,
+    })
+
+
+async def authenticate_user(email: str, password: str) -> dict:
     user = await get_user_by_email(email)
-    if not user:
-        return None
-    if not verify_password(password, user["password"]):
-        return None
+    # Same message whether the email or the password is wrong (no account enumeration).
+    if not user or not verify_password(password, user.get("password", "")):
+        raise Unauthorized("Invalid email or password")
+    if user.get("is_active", True) is False:
+        raise Forbidden("This account has been deactivated. Contact your administrator.", code="account_inactive")
+    if user.get("role") in ("faculty", "teacher", "hod") and not user.get("is_approved"):
+        raise Forbidden("Your account is awaiting admin approval.", code="pending_approval")
+    await get_database().users.update_one({"_id": user["_id"]}, {"$set": {"last_login_at": _now()}})
     return user
+
+
+async def change_password(user: dict, current_password: str, new_password: str) -> None:
+    if not verify_password(current_password, user.get("password", "")):
+        raise BadRequest("Current password is incorrect")
+    await get_database().users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password": hash_password(new_password), "updated_at": _now()},
+         "$inc": {"token_version": 1}},
+    )

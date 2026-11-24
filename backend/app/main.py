@@ -1,31 +1,59 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
-from app.database import connect_db, close_db
-from app.routes import health
-from app.routes import auth_routes
-from app.routes import admin_routes
-from app.routes import assessment_routes
-from app.routes import submission_routes
-from app.routes import teacher_routes
-from app.routes import analytics_routes
-from app.routes import ocr_routes
+from app.core.config import settings  # loads .env first; fails fast on weak secrets
+from app.core.errors import register_exception_handlers
+from app.core.observability import RateLimitMiddleware, RequestContextMiddleware, configure_logging
+from app.database import close_db, connect_db, run_migrations
+from app.routes import (
+    admin_routes,
+    analytics_routes,
+    assessment_routes,
+    auth_routes,
+    health,
+    ocr_routes,
+    submission_routes,
+    teacher_routes,
+)
 
-load_dotenv()
+configure_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    database = await connect_db()
+    await run_migrations(database)
+    from app.jobs.worker import start_worker, stop_worker
+    await start_worker()
+    try:
+        yield
+    finally:
+        await stop_worker()
+        await close_db()
+
 
 app = FastAPI(
     title="GradeMaster AI",
-    description="AI-powered grading system backend",
-    version="1.0.0"
+    description="AI-assisted assessment and evaluation platform (MCQ, coding, handwritten).",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url=None,
+    openapi_url="/api/openapi.json",
 )
 
+register_exception_handlers(app)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,  # bearer tokens, not cookies
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "Content-Disposition"],
 )
 
 app.include_router(health.router, prefix="/api", tags=["Health"])
@@ -33,16 +61,6 @@ app.include_router(auth_routes.router, prefix="/api/auth", tags=["Authentication
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(assessment_routes.router, prefix="/api", tags=["Assessments"])
 app.include_router(submission_routes.router, prefix="/api", tags=["Submissions"])
-app.include_router(teacher_routes.router, tags=["Teacher"])
+app.include_router(teacher_routes.router, prefix="/api/teacher", tags=["Teacher review"])
 app.include_router(analytics_routes.router, prefix="/api", tags=["Analytics & Reports"])
-app.include_router(ocr_routes.router, prefix="/api", tags=["OCR - Handwritten"])
-
-
-@app.on_event("startup")
-async def startup_event():
-    await connect_db()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await close_db()
+app.include_router(ocr_routes.router, prefix="/api", tags=["Handwritten"])
