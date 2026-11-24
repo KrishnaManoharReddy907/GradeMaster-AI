@@ -141,9 +141,27 @@ def calculate_mcq_score(answers: List, mcq_questions: List[dict]) -> dict:
 
 
 async def _generate_mcq_explanations(results: list, mcq_questions: list) -> list:
-    """Generate AI explanations for wrong MCQ answers using Gemini."""
+    """Generate AI explanations for wrong MCQ answers using Gemini.
+    
+    Includes retry logic with exponential backoff for transient network errors
+    (e.g. DNS resolution failures, timeouts).
+    """
+    import asyncio
+    import traceback
+
     wrong_results = [r for r in results if not r["is_correct"]]
     if not wrong_results:
+        # Still mark correct answers with empty explanation
+        for r in results:
+            if "ai_explanation" not in r:
+                r["ai_explanation"] = ""
+        return results
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("MCQ AI explanation skipped: GEMINI_API_KEY not set")
+        for r in results:
+            r["ai_explanation"] = r.get("ai_explanation", "")
         return results
 
     question_map = {q["question_id"]: q for q in mcq_questions}
@@ -183,39 +201,75 @@ q1: The correct answer is X because... Your choice Y is incorrect because...
 
 Use the exact question_id values shown in parentheses above (like q1, q2, etc)."""
 
-    try:
-        from google import genai
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={"max_output_tokens": 2048, "temperature": 0.3}
-        )
+    MAX_RETRIES = 3
+    last_error = None
 
-        text = response.text.strip()
-        # Parse "qid: explanation" lines
-        explanations = {}
-        for line in text.split("\n"):
-            line = line.strip()
-            if ":" in line:
-                parts = line.split(":", 1)
-                qid = parts[0].strip().lower()
-                explanation = parts[1].strip()
-                if explanation:
-                    explanations[qid] = explanation
+    for attempt in range(MAX_RETRIES):
+        try:
+            from google import genai
+            from google.genai import types
 
-        # Attach explanations to results
-        for r in results:
-            if not r["is_correct"]:
-                qid = r["question_id"].lower()
-                r["ai_explanation"] = explanations.get(qid, "")
-            else:
-                r["ai_explanation"] = ""
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=2048,
+                    temperature=0.3,
+                )
+            )
 
-    except Exception as e:
-        print(f"MCQ AI explanation failed: {e}")
-        # Fallback: no explanations
-        for r in results:
+            text = response.text.strip()
+            # Parse "qid: explanation" lines
+            explanations = {}
+            for line in text.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    qid = parts[0].strip().lower()
+                    explanation = parts[1].strip()
+                    if explanation:
+                        explanations[qid] = explanation
+
+            # Attach explanations to results
+            for r in results:
+                if not r["is_correct"]:
+                    qid = r["question_id"].lower()
+                    r["ai_explanation"] = explanations.get(qid, "")
+                else:
+                    r["ai_explanation"] = ""
+
+            print(f"MCQ AI explanations generated successfully ({len(explanations)} explanations for {len(wrong_results)} wrong answers)")
+            return results
+
+        except Exception as e:
+            last_error = e
+            error_msg = str(e)
+            print(f"MCQ AI explanation attempt {attempt + 1}/{MAX_RETRIES} failed: {error_msg}")
+
+            # Check if it's a retryable network error
+            is_network_error = any(keyword in error_msg.lower() for keyword in [
+                "getaddrinfo", "connection", "timeout", "temporary failure",
+                "name resolution", "network", "dns", "errno 11001",
+                "503", "429", "500", "502", "504"
+            ])
+
+            if is_network_error and attempt < MAX_RETRIES - 1:
+                wait_time = (2 ** attempt) + 1  # 2s, 5s backoff
+                print(f"Retrying MCQ AI explanation in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            elif not is_network_error:
+                # Non-retryable error (e.g. invalid API key, bad request)
+                print(f"MCQ AI explanation non-retryable error: {error_msg}")
+                traceback.print_exc()
+                break
+
+    # All retries exhausted — fallback: empty explanations
+    print(f"MCQ AI explanation failed after {MAX_RETRIES} attempts. Last error: {last_error}")
+    for r in results:
+        if "ai_explanation" not in r:
             r["ai_explanation"] = ""
 
     return results
