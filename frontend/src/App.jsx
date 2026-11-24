@@ -1,168 +1,133 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
-import { useApp, normalizeRoleForRoute } from './lib/context/AppContext'
-import Toast from './components/Toast'
-import Loader from './components/Loader'
+import { Component, lazy, Suspense } from 'react'
+import { Route, Routes } from 'react-router-dom'
+import AppShell from './components/AppShell'
+import { Button, PageSkeleton } from './components/ui'
+import { RequireRole, PublicOnly } from './components/guards'
+import { STAFF_ROLES, useAuth } from './lib/auth'
 
-// Public pages
-import Landing from './pages/Landing'
-import Login from './pages/Login'
-import Signup from './pages/Signup'
-import AdminSetup from './pages/AdminSetup'
+const page = (loader) => lazy(loader)
 
-// Student pages
-import StudentDashboard from './pages/student/StudentDashboard'
-import StudentAssessments from './pages/student/Assessments'
-import SolveMCQ from './pages/student/SolveMCQ'
-import SolveCoding from './pages/student/SolveCoding'
-import SolveManual from './pages/student/SolveManual'
-import SubmissionStatus from './pages/student/SubmissionStatus'
-import StudentSubmissionDetails from './pages/student/SubmissionDetails'
-import StudentAnalytics from './pages/student/Analytics'
-import QuestionReview from './pages/student/QuestionReview'
+// Public
+const Landing = page(() => import('./pages/public/Landing'))
+const Login = page(() => import('./pages/public/Login'))
+const Signup = page(() => import('./pages/public/Signup'))
+const Setup = page(() => import('./pages/public/Setup'))
+const Account = page(() => import('./pages/shared/Account'))
+const NotFound = page(() => import('./pages/shared/NotFound'))
+// Admin
+const AdminOverview = page(() => import('./pages/admin/Overview'))
+const AdminApprovals = page(() => import('./pages/admin/Approvals'))
+const AdminUsers = page(() => import('./pages/admin/Users'))
+const AdminAcademics = page(() => import('./pages/admin/Academics'))
+const AdminAssignments = page(() => import('./pages/admin/Assignments'))
+const AdminAudit = page(() => import('./pages/admin/Audit'))
+// Teacher
+const TeacherDashboard = page(() => import('./pages/teacher/Dashboard'))
+const TeacherAssessments = page(() => import('./pages/teacher/Assessments'))
+const AssessmentBuilder = page(() => import('./pages/teacher/builder/AssessmentBuilder'))
+const AssessmentWorkspace = page(() => import('./pages/teacher/AssessmentWorkspace'))
+const CodingReview = page(() => import('./pages/teacher/CodingReview'))
+const ManualReview = page(() => import('./pages/teacher/ManualReview'))
+const McqSubmission = page(() => import('./pages/teacher/McqSubmission'))
+const PlagiarismCompare = page(() => import('./pages/teacher/PlagiarismCompare'))
+const ReviewQueue = page(() => import('./pages/teacher/ReviewQueue'))
+const QuestionBank = page(() => import('./pages/teacher/QuestionBank'))
+const ClassAnalytics = page(() => import('./pages/teacher/ClassAnalytics'))
+const StudentProfile = page(() => import('./pages/teacher/StudentProfile'))
+const AssessmentReport = page(() => import('./pages/teacher/AssessmentReport'))
+// Student
+const StudentDashboard = page(() => import('./pages/student/Dashboard'))
+const StudentAssessments = page(() => import('./pages/student/Assessments'))
+const TakeMcq = page(() => import('./pages/student/TakeMcq'))
+const TakeCoding = page(() => import('./pages/student/TakeCoding'))
+const TakeHandwritten = page(() => import('./pages/student/TakeHandwritten'))
+const Results = page(() => import('./pages/student/Results'))
+const ResultDetail = page(() => import('./pages/student/ResultDetail'))
+const ReleasedPaper = page(() => import('./pages/student/ReleasedPaper'))
+const Progress = page(() => import('./pages/student/Progress'))
 
-// Teacher pages
-import TeacherDashboard from './pages/teacher/TeacherDashboard'
-import CreateAssessment from './pages/teacher/CreateAssessment'
-import TeacherAssessments from './pages/teacher/AssessmentDetails'
-import Submissions from './pages/teacher/Submissions'
-import EvaluateSubmission from './pages/teacher/EvaluateSubmission'
-import ReviewSubmission from './pages/teacher/ReviewSubmission'
-import ReviewHistory from './pages/teacher/ReviewHistory'
-import ManualReview from './pages/teacher/ManualReview'
-import TeacherAnalytics from './pages/teacher/Analytics'
-import AssessmentReport from './pages/teacher/AssessmentReport'
-import MCQDetails from './pages/teacher/MCQDetails'
-
-// Admin pages
-import AdminDashboard from './pages/admin/AdminDashboard'
-import Departments from './pages/admin/Departments'
-import Sections from './pages/admin/Sections'
-import Subjects from './pages/admin/Subjects'
-import AssignTeacher from './pages/admin/AssignTeacher'
-import PendingUsers from './pages/admin/PendingUsers'
-
-// Layout
-import DashboardLayout from './components/DashboardLayout'
-
-function ProtectedRoute({ children, allowedRoles }) {
-  const { user, loading } = useApp()
-
-  if (loading) {
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error, info) { console.error(error, info) }
+  render() {
+    if (!this.state.error) return this.props.children
+    const chunk = /Loading chunk|dynamically imported module/i.test(String(this.state.error?.message))
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader size="lg" />
+      <div className="grid min-h-[60vh] place-items-center p-6 text-center">
+        <div>
+          <p className="text-lg font-semibold">{chunk ? 'A new version is available' : 'Something went wrong'}</p>
+          <p className="mt-1 text-ink-3">{chunk ? 'Reload to get the latest version.' : 'The error has been logged. Reloading usually helps.'}</p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>Reload</Button>
+        </div>
       </div>
     )
   }
-
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    const route = normalizeRoleForRoute(user.role)
-    return <Navigate to={`/${route}`} replace />
-  }
-
-  return children
 }
 
-function PublicRoute({ children }) {
-  const { user, loading } = useApp()
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader size="lg" />
-      </div>
-    )
-  }
-
-  if (user) {
-    const route = normalizeRoleForRoute(user.role)
-    return <Navigate to={`/${route}`} replace />
-  }
-
-  return children
-}
+const STAFF = [...STAFF_ROLES, 'admin']
 
 export default function App() {
-  const { toasts, removeToast } = useApp()
-
   return (
-    <>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
-        <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-        <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
-        <Route path="/setup" element={<PublicRoute><AdminSetup /></PublicRoute>} />
+    <ErrorBoundary>
+      <Suspense fallback={<div className="p-8"><PageSkeleton /></div>}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+          <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
+          <Route path="/setup" element={<PublicOnly><Setup /></PublicOnly>} />
 
-        {/* Student routes */}
-        <Route path="/student" element={
-          <ProtectedRoute allowedRoles={['student']}>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }>
-          <Route index element={<StudentDashboard />} />
-          <Route path="assessments" element={<StudentAssessments />} />
-          <Route path="assessments/:id/mcq" element={<SolveMCQ />} />
-          <Route path="assessments/:id/coding" element={<SolveCoding />} />
-          <Route path="assessments/:id/manual" element={<SolveManual />} />
-          <Route path="submissions" element={<SubmissionStatus />} />
-          <Route path="submissions/:id" element={<StudentSubmissionDetails />} />
-          <Route path="assessments/:id/review-questions" element={<QuestionReview />} />
-          <Route path="analytics" element={<StudentAnalytics />} />
-        </Route>
+          <Route element={<RequireRole roles={['admin']}><AppShell portal="admin" /></RequireRole>}>
+            <Route path="/admin" element={<AdminOverview />} />
+            <Route path="/admin/approvals" element={<AdminApprovals />} />
+            <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/admin/academics" element={<AdminAcademics />} />
+            <Route path="/admin/assignments" element={<AdminAssignments />} />
+            <Route path="/admin/audit" element={<AdminAudit />} />
+          </Route>
 
-        {/* Teacher routes - allow both 'teacher' and 'faculty' roles */}
-        <Route path="/teacher" element={
-          <ProtectedRoute allowedRoles={['teacher', 'faculty', 'hod']}>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }>
-          <Route index element={<TeacherDashboard />} />
-          <Route path="create-assessment" element={<CreateAssessment />} />
-          <Route path="assessments" element={<TeacherAssessments />} />
-          <Route path="assessments/:id/submissions" element={<Submissions />} />
-          <Route path="submissions/:id/evaluate" element={<EvaluateSubmission />} />
-          <Route path="submissions/:id/review" element={<ReviewSubmission />} />
-          <Route path="submissions/:id/history" element={<ReviewHistory />} />
-          <Route path="submissions/:id/mcq-details" element={<MCQDetails />} />
-          <Route path="manual-submissions/:id/review" element={<ManualReview />} />
-          <Route path="assessments/:id/report" element={<AssessmentReport />} />
-          <Route path="analytics" element={<TeacherAnalytics />} />
-        </Route>
+          <Route element={<RequireRole roles={STAFF}><AppShell portal="teacher" /></RequireRole>}>
+            <Route path="/teacher" element={<TeacherDashboard />} />
+            <Route path="/teacher/assessments" element={<TeacherAssessments />} />
+            <Route path="/teacher/assessments/new" element={<AssessmentBuilder />} />
+            <Route path="/teacher/assessments/:id" element={<AssessmentWorkspace />} />
+            <Route path="/teacher/assessments/:id/report" element={<AssessmentReport />} />
+            <Route path="/teacher/coding/:id" element={<CodingReview />} />
+            <Route path="/teacher/manual/:id" element={<ManualReview />} />
+            <Route path="/teacher/mcq/:id" element={<McqSubmission />} />
+            <Route path="/teacher/plagiarism" element={<PlagiarismCompare />} />
+            <Route path="/teacher/review" element={<ReviewQueue />} />
+            <Route path="/teacher/bank" element={<QuestionBank />} />
+            <Route path="/teacher/analytics" element={<ClassAnalytics />} />
+            <Route path="/teacher/students/:id" element={<StudentProfile />} />
+          </Route>
 
-        {/* Admin routes */}
-        <Route path="/admin" element={
-          <ProtectedRoute allowedRoles={['admin']}>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }>
-          <Route index element={<AdminDashboard />} />
-          <Route path="departments" element={<Departments />} />
-          <Route path="sections" element={<Sections />} />
-          <Route path="subjects" element={<Subjects />} />
-          <Route path="assign-teacher" element={<AssignTeacher />} />
-          <Route path="pending-users" element={<PendingUsers />} />
-        </Route>
+          <Route element={<RequireRole roles={['student']}><AppShell portal="student" /></RequireRole>}>
+            <Route path="/student" element={<StudentDashboard />} />
+            <Route path="/student/assessments" element={<StudentAssessments />} />
+            <Route path="/student/results" element={<Results />} />
+            <Route path="/student/results/:id" element={<ResultDetail />} />
+            <Route path="/student/paper/:id" element={<ReleasedPaper />} />
+            <Route path="/student/progress" element={<Progress />} />
+          </Route>
 
-        {/* Catch all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Exam screens: full-screen, no navigation chrome. */}
+          <Route path="/student/take/mcq/:id" element={<RequireRole roles={['student']}><TakeMcq /></RequireRole>} />
+          <Route path="/student/take/coding/:id" element={<RequireRole roles={['student']}><TakeCoding /></RequireRole>} />
+          <Route path="/student/take/handwritten/:id" element={<RequireRole roles={['student']}><TakeHandwritten /></RequireRole>} />
 
-      {/* Toast container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map(toast => (
-          <Toast
-            key={toast.id}
-            message={toast.message}
-            type={toast.type}
-            onClose={() => removeToast(toast.id)}
-          />
-        ))}
-      </div>
-    </>
+          <Route path="/account" element={<RequireRole><AccountShell /></RequireRole>}>
+            <Route index element={<Account />} />
+          </Route>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   )
+}
+
+function AccountShell() {
+  const { user } = useAuth()
+  const portal = user.role === 'admin' ? 'admin' : user.role === 'student' ? 'student' : 'teacher'
+  return <AppShell portal={portal} />
 }

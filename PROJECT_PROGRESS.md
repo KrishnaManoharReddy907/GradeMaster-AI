@@ -1,6 +1,6 @@
 # Project Progress
 
-_Last updated: 2026-11-24 (session 1)_
+_Last updated: 2026-11-25 (session 1, continued)_
 
 ## Phase status
 | Phase | Status |
@@ -9,11 +9,11 @@ _Last updated: 2026-11-24 (session 1)_
 | 1 Project understanding | ☑ done |
 | 2 Technical audit | ☑ `docs/AUDIT_REPORT.md` |
 | 3 Roadmap | ☑ `IMPLEMENTATION_ROADMAP.md` |
-| Stage A: critical fixes & backend foundation | ☑ done, 45 tests passing |
-| Stage B: evaluation engines | ☑ done (live Gemini/Vision/Judge0 smoke test still pending) |
-| Stage C: new features | ◐ review queue, plagiarism view, topic mastery, admin governance done; question bank + AI generator next |
-| Stage D: frontend redesign | ☐ |
-| Stage E: hardening, deploy, docs | ☐ |
+| Stage A: critical fixes & backend foundation | ☑ done |
+| Stage B: evaluation engines | ☑ done; live smoke tests passed (Gemini JSON, Judge0 batch, Vision OCR, rubric grading, code feedback) |
+| Stage C: new features | ☑ review queue, structural plagiarism, topic mastery, admin governance, question bank, AI question generator |
+| Stage D: frontend redesign | ☑ new React app (design system, 3 portals, exam flows, SVG charts), 19 Vitest tests, screenshot QA |
+| Stage E: hardening, deploy, docs | ◐ next |
 
 ## What changed in the backend (commit `299f33e`)
 * `app/core/`: config (pydantic-settings), security, deps (role + ownership), errors, observability (logging, request id, rate limit)
@@ -41,6 +41,15 @@ _Last updated: 2026-11-24 (session 1)_
   `/api/analytics/students/{id}`, admin `/users`, `/staff`, `/users/{id}/status`, `/reject-user/{id}`, `/audit-log`, `/system-health`, `/overview`, `PUT /subjects/{id}/topics`, `DELETE /teacher-assignments/{id}`.
 * Analytics responses are plain data (no server-side Plotly JSON).
 
+## Frontend (Stage D)
+* Rebuilt from scratch in `frontend/src`: React 19 + Vite 8 + Tailwind v4 tokens (light/dark), lazy routes, role guards (`components/guards.jsx`).
+* Design system in `components/ui/` (primitives + domain badges); charts in `components/charts.jsx` with a Chart/Table toggle on every chart.
+* Portals: admin (overview, approvals, people, academics, assignments, audit), teacher (dashboard, builder, workspace, coding/manual/MCQ review, similarity compare, review queue, question bank, class analytics, student profile, report), student (dashboard, timed MCQ/coding/handwritten exams with server-clock deadline, results, released paper, progress).
+* Removed: old pages/components, placeholder images, Plotly.
+* Tests: `npm test` (Vitest: api client, route guards, charts, deadline clock, formatters). Backend: `pytest` 52 passing.
+* Visual QA by headless Chrome screenshots (desktop, dark mode, 390 px mobile); no page errors.
+* Analytics: `hardest_questions[]` now includes `question_text`.
+
 ## Data migrations
 Applied to `grademaster_dev` only. One duplicate MCQ submission was moved to `submission_duplicates_archive`.
 ⚠ The original `grademaster` DB has **not** been migrated. That happens at deployment, with owner approval.
@@ -49,6 +58,6 @@ Applied to `grademaster_dev` only. One duplicate MCQ submission was moved to `su
 None yet (deployment accounts are requested in Stage E).
 
 ## Next steps
-1. C3/C4: question bank collection + AI question generator endpoints (+ tests).
-2. Stage D: frontend redesign against the new contracts (design system first).
-3. Live smoke test with real Gemini/Vision/Judge0 keys from `.env` on the dev DB.
+1. Stage E: security hardening review, Dockerfile + deployment config (backend host, static frontend, MongoDB Atlas).
+2. Owner sets up hosting accounts and secrets (instructions will be provided); production DB migration only with approval.
+3. README + thesis-level master documentation.

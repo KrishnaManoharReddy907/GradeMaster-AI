@@ -1,476 +1,185 @@
-const BASE_URL = "http://localhost:8000"
+/**
+ * API client. One place for base URL, auth header, error normalisation and the
+ * 401 → sign-in redirect. Pages call the typed helpers at the bottom.
+ */
 
-const getHeaders = (token) => {
-  const headers = {
-    'Content-Type': 'application/json',
+export const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+const TOKEN_KEY = 'gm-token'
+
+export const tokenStore = {
+  get: () => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } },
+  set: (t) => { try { localStorage.setItem(TOKEN_KEY, t) } catch { /* private mode */ } },
+  clear: () => { try { localStorage.removeItem(TOKEN_KEY) } catch { /* private mode */ } },
+}
+
+export class ApiError extends Error {
+  constructor(status, message, code, details) {
+    super(message)
+    this.status = status
+    this.code = code
+    this.details = details
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+}
+
+let onUnauthorized = () => {}
+export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
+
+async function request(method, path, { body, query, form, raw, signal } = {}) {
+  const url = new URL(API_URL + path)
+  if (query) {
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
+    })
   }
-  return headers
-}
-
-const handleResponse = async (response) => {
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'An error occurred' }))
-    const err = {
-      status: response.status,
-      message: error.detail || error.message || 'Request failed'
-    }
-    // Auto-logout on 401
-    if (response.status === 401) {
-      localStorage.removeItem('token')
-      // Redirect to login if not already there
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
-        window.location.href = '/login'
-      }
-    }
-    throw err
+  const headers = {}
+  const token = tokenStore.get()
+  if (token) headers.Authorization = `Bearer ${token}`
+  let payload
+  if (form) payload = form
+  else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    payload = JSON.stringify(body)
   }
-  return response.json()
+
+  let res
+  try {
+    res = await fetch(url, { method, headers, body: payload, signal })
+  } catch (e) {
+    if (e.name === 'AbortError') throw e
+    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.', 'network')
+  }
+
+  if (res.status === 401 && token) {
+    tokenStore.clear()
+    onUnauthorized()
+  }
+  if (!res.ok) {
+    let data = {}
+    try { data = await res.json() } catch { /* non-JSON error */ }
+    const message = typeof data.detail === 'string' ? data.detail
+      : res.status === 429 ? 'Too many requests. Please wait a moment.'
+      : res.status >= 500 ? 'Something went wrong on the server. Please try again.'
+      : 'Request failed'
+    throw new ApiError(res.status, message, data.code, data.errors)
+  }
+  if (raw) return res
+  if (res.status === 204) return null
+  return res.json()
 }
 
-// AUTH APIs
-export const authAPI = {
-  checkSetup: async () => {
-    const response = await fetch(`${BASE_URL}/api/admin/check-setup`, {
-      headers: getHeaders(),
-    })
-    return handleResponse(response)
-  },
+const get = (p, query, opts) => request('GET', p, { query, ...opts })
+const post = (p, body, opts) => request('POST', p, { body, ...opts })
+const put = (p, body) => request('PUT', p, { body })
+const patch = (p, body) => request('PATCH', p, { body })
+const del = (p) => request('DELETE', p)
 
-  signup: async (data) => {
-    const response = await fetch(`${BASE_URL}/api/auth/signup`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  login: async (data) => {
-    const response = await fetch(`${BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  me: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/auth/me`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
+export async function downloadFile(path, fallbackName) {
+  const res = await request('GET', path, { raw: true })
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const name = /filename="?([^"]+)"?/.exec(disposition)?.[1] || fallbackName
+  const url = URL.createObjectURL(blob)
+  const a = Object.assign(document.createElement('a'), { href: url, download: name })
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-// ADMIN APIs
-export const adminAPI = {
-  getDepartments: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/departments`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  createDepartment: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/admin/departments`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  getSections: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/sections`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  createSection: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/admin/sections`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  getSubjects: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/subjects`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  createSubject: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/admin/subjects`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  assignTeacher: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/admin/assign-teacher`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  getTeacherAssignments: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/teacher-assignments`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getPendingUsers: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/pending-users`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  approveUser: async (token, userId) => {
-    const response = await fetch(`${BASE_URL}/api/admin/approve-user/${userId}`, {
-      method: 'PUT',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getApprovedTeachers: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/admin/approved-teachers`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
+export async function fetchBlobUrl(path) {
+  const res = await request('GET', path, { raw: true })
+  return URL.createObjectURL(await res.blob())
 }
 
-// TEACHER APIs
-export const teacherAPI = {
-  getMyAssignments: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/my-assignments`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
+export const api = {
+  auth: {
+    login: (email, password) => post('/api/auth/login', { email, password }),
+    signup: (data) => post('/api/auth/signup', data),
+    me: () => get('/api/auth/me'),
+    bootstrapAdmin: (data) => post('/api/auth/bootstrap-admin', data),
+    changePassword: (current_password, password) => post('/api/auth/change-password', { current_password, password }),
+    checkSetup: () => get('/api/admin/check-setup'),
   },
-
-  getAssessments: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/assessments`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
+  catalog: {
+    departments: () => get('/api/admin/departments'),
+    sections: () => get('/api/admin/sections'),
+    subjects: () => get('/api/admin/subjects'),
   },
-
-  createAssessment: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/assessments`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
+  admin: {
+    overview: () => get('/api/admin/overview'),
+    health: () => get('/api/admin/system-health'),
+    createDepartment: (data) => post('/api/admin/departments', data),
+    createSection: (data) => post('/api/admin/sections', data),
+    createSubject: (data) => post('/api/admin/subjects', data),
+    setTopics: (id, topics) => put(`/api/admin/subjects/${id}/topics`, { topics }),
+    assignments: () => get('/api/admin/teacher-assignments'),
+    assign: (data) => post('/api/admin/assign-teacher', data),
+    removeAssignment: (id) => del(`/api/admin/teacher-assignments/${id}`),
+    approvedTeachers: () => get('/api/admin/approved-teachers'),
+    pending: () => get('/api/admin/pending-users'),
+    approve: (id) => put(`/api/admin/approve-user/${id}`),
+    reject: (id) => put(`/api/admin/reject-user/${id}`),
+    users: (q) => get('/api/admin/users', q),
+    createStaff: (data) => post('/api/admin/staff', data),
+    setActive: (id, is_active) => put(`/api/admin/users/${id}/status`, { is_active }),
+    audit: (q) => get('/api/admin/audit-log', q),
   },
-
-  getAssessment: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/assessments/${assessmentId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
+  teacher: {
+    myAssignments: () => get('/api/teacher/my-assignments'),
+    assessments: () => get('/api/teacher/assessments'),
+    assessment: (id) => get(`/api/teacher/assessments/${id}`),
+    createAssessment: (data) => post('/api/teacher/assessments', data),
+    updateAssessment: (id, data) => patch(`/api/teacher/assessments/${id}`, data),
+    deleteAssessment: (id) => del(`/api/teacher/assessments/${id}`),
+    stats: () => get('/api/teacher/assessment-stats'),
+    submissions: (id) => get(`/api/teacher/submissions/assessment/${id}`),
+    evaluate: (id) => post(`/api/teacher/evaluate/${id}`),
+    evaluateAll: (id) => post(`/api/teacher/evaluate-assessment/${id}`),
+    finalizeAllCoding: (id) => post(`/api/teacher/assessments/${id}/finalize-coding`),
+    job: (id) => get(`/api/teacher/jobs/${id}`),
+    coding: (id) => get(`/api/teacher/submission/${id}`),
+    review: (id, final_score, teacher_feedback) => post(`/api/teacher/review/${id}`, { final_score, teacher_feedback }),
+    finalize: (id) => post(`/api/teacher/finalize/${id}`),
+    mcq: (id) => get(`/api/teacher/mcq-submission/${id}`),
+    manual: (id) => get(`/api/teacher/manual-submission/${id}`),
+    reviewManual: (id, data) => put(`/api/teacher/manual-submission/${id}/review`, data),
+    queue: () => get('/api/teacher/review-queue'),
+    plagiarism: (id) => get(`/api/teacher/assessments/${id}/plagiarism`),
+    compare: (a, b) => get('/api/teacher/plagiarism/compare', { a, b }),
+    bank: (q) => get('/api/teacher/question-bank', q),
+    addToBank: (data) => post('/api/teacher/question-bank', data),
+    removeFromBank: (id) => del(`/api/teacher/question-bank/${id}`),
+    importToBank: (assessmentId) => post(`/api/teacher/question-bank/import/${assessmentId}`),
+    markBankUsed: (ids) => post('/api/teacher/question-bank/mark-used', { ids }),
+    generate: (data) => post('/api/teacher/ai/generate-questions', data),
+    uploadUrl: (fileId) => `/api/teacher/uploads/${fileId}`,
   },
-
-  evaluateSubmission: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/evaluate/${submissionId}`, {
-      method: 'POST',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
+  student: {
+    assessments: () => get('/api/student/assessments'),
+    assessment: (id) => get(`/api/student/assessments/${id}`),
+    start: (id) => post(`/api/student/assessments/${id}/start`),
+    paper: (id) => get(`/api/student/assessments/${id}/review-questions`),
+    submitMcq: (assessment_id, answers) => post('/api/student/submit-mcq', { assessment_id, answers }),
+    submitCode: (data) => post('/api/student/submit-coding', data),
+    status: (id) => get(`/api/student/submission-status/${id}`),
+    submissions: () => get('/api/student/all-submissions'),
+    manualResult: (id) => get(`/api/student/manual-submission-detail/${id}`),
+    uploadHandwritten: (file, assessmentId) => {
+      const form = new FormData()
+      form.append('file', file)
+      if (assessmentId) form.append('assessment_id', assessmentId)
+      return request('POST', '/api/student/upload-handwritten', { form })
+    },
+    processHandwritten: (raw_text, assessment_id) => post('/api/student/process-handwritten', { raw_text, assessment_id }),
+    submitHandwritten: (data) => post('/api/student/evaluate-handwritten', data),
   },
-
-  evaluateAssessment: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/evaluate-assessment/${assessmentId}`, {
-      method: 'POST',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  reviewSubmission: async (token, submissionId, data) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/review/${submissionId}`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  finalizeSubmission: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/finalize/${submissionId}`, {
-      method: 'POST',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getReviewHistory: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/review-history/${submissionId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getSubmission: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/submission/${submissionId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getAssessmentSubmissions: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/submissions/assessment/${assessmentId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getMcqSubmissionDetail: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/mcq-submission/${submissionId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getAssessmentStats: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/assessment-stats`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  // Manual submission review
-  getManualSubmission: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/manual-submission/${submissionId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  reviewManualSubmission: async (token, submissionId, data) => {
-    const response = await fetch(`${BASE_URL}/api/teacher/manual-submission/${submissionId}/review`, {
-      method: 'PUT',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-}
-
-// STUDENT APIs
-export const studentAPI = {
-  getAssessments: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/student/assessments`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getAssessmentDetail: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/student/assessments/${assessmentId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getReviewQuestions: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/student/assessments/${assessmentId}/review-questions`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  submitMCQ: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/student/submit-mcq`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  submitCoding: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/student/submit-coding`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-
-  getSubmissionStatus: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/student/submission-status/${assessmentId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getAllSubmissions: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/student/all-submissions`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getManualSubmissionDetail: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/student/manual-submission-detail/${assessmentId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getSubmission: async (token, submissionId) => {
-    const response = await fetch(`${BASE_URL}/api/student/submission/${submissionId}`, {
-      method: 'GET',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  // Manual (Handwritten) Assignment APIs
-  uploadHandwritten: async (token, file) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await fetch(`${BASE_URL}/api/student/upload-handwritten`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData,
-    })
-    return handleResponse(response)
-  },
-
-  processHandwritten: async (token, rawText, questions = null) => {
-    const body = { raw_text: rawText }
-    if (questions) body.questions = questions
-    const response = await fetch(`${BASE_URL}/api/student/process-handwritten`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(body),
-    })
-    return handleResponse(response)
-  },
-
-  evaluateHandwritten: async (token, data) => {
-    const response = await fetch(`${BASE_URL}/api/student/evaluate-handwritten`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(data),
-    })
-    return handleResponse(response)
-  },
-}
-
-// GENERAL APIs
-export const generalAPI = {
-  healthCheck: async () => {
-    const response = await fetch(`${BASE_URL}/api/health`, {
-      method: 'GET',
-    })
-    return handleResponse(response)
-  },
-}
-
-// ANALYTICS APIs
-export const analyticsAPI = {
-  getTeacherDashboard: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/analytics/teacher-dashboard`, {
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  getStudentDashboard: async (token) => {
-    const response = await fetch(`${BASE_URL}/api/analytics/student-dashboard`, {
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  downloadStudentReport: async (token, studentId) => {
-    const response = await fetch(`${BASE_URL}/api/reports/student/${studentId}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-    if (!response.ok) {
-      throw { status: response.status, message: 'Failed to download report' }
-    }
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `student_report_${studentId.slice(0, 8)}.pdf`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    window.URL.revokeObjectURL(url)
-  },
-
-  downloadAssessmentReport: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/reports/assessment/${assessmentId}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-    if (!response.ok) {
-      throw { status: response.status, message: 'Failed to download report' }
-    }
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `assessment_report_${assessmentId.slice(0, 8)}.pdf`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    window.URL.revokeObjectURL(url)
-  },
-
-  getAssessmentReport: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/analytics/assessment-report/${assessmentId}`, {
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
-  },
-
-  regenerateAssessmentReport: async (token, assessmentId) => {
-    const response = await fetch(`${BASE_URL}/api/analytics/assessment-report/${assessmentId}/regenerate`, {
-      method: 'POST',
-      headers: getHeaders(token),
-    })
-    return handleResponse(response)
+  analytics: {
+    teacher: (assessment_id) => get('/api/analytics/teacher-dashboard', { assessment_id }),
+    student: () => get('/api/analytics/student-dashboard'),
+    studentProfile: (id) => get(`/api/analytics/students/${id}`),
+    report: (id) => get(`/api/analytics/assessment-report/${id}`),
+    regenerate: (id) => post(`/api/analytics/assessment-report/${id}/regenerate`),
+    downloadStudentPdf: (id) => downloadFile(`/api/reports/student/${id}`, 'student-report.pdf'),
+    downloadAssessmentPdf: (id) => downloadFile(`/api/reports/assessment/${id}`, 'assessment-report.pdf'),
   },
 }

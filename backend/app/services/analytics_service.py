@@ -174,8 +174,14 @@ def _serialize_row(r: dict) -> dict:
 
 async def get_student_analytics(student: dict) -> dict:
     sid = str(student["_id"])
-    assessments = await _assessments({"section_ids": student.get("section_id"), "year": student.get("year")}) \
-        if student.get("section_id") else {}
+    db = get_database()
+    submitted_ids = set()
+    for coll in ("mcq_submissions", "coding_submissions", "manual_submissions"):
+        submitted_ids.update(await db[coll].distinct("assessment_id", {"student_id": sid}))
+    clauses = [{"_id": {"$in": [ObjectId(i) for i in submitted_ids if ObjectId.is_valid(i)]}}]
+    if student.get("section_id"):
+        clauses.append({"section_ids": student["section_id"], "year": student.get("year")})
+    assessments = await _assessments({"$or": clauses})
     rows, questions, bugs, missed = await collect(assessments, student_id=sid, student_view=True)
     topics = topic_mastery([q for q in questions if q["student_id"] == sid])
 
@@ -249,8 +255,18 @@ async def get_teacher_analytics(teacher: dict, assessment_id: Optional[str] = No
     q_groups: Dict[tuple, List[dict]] = defaultdict(list)
     for q in questions:
         q_groups[(q["assessment_id"], q["question_id"])].append(q)
+    def question_text(aid: str, qid: str) -> str:
+        a = assessments[aid]
+        for q in (a.get("mcq_questions") or []) + (a.get("manual_questions") or []):
+            if q.get("question_id") == qid:
+                return q.get("question_text", "")
+        for q in a.get("coding_questions") or []:
+            if q.get("question_id") == qid:
+                return q.get("title", "")
+        return qid
+
     hardest = sorted([{"assessment_id": k[0], "assessment_title": assessments[k[0]]["title"], "question_id": k[1],
-                       "topic": v[0]["topic"], "attempts": len(v),
+                       "question_text": question_text(k[0], k[1]), "topic": v[0]["topic"], "attempts": len(v),
                        "average": _pct(sum(x["score"] for x in v), sum(x["max"] for x in v))}
                       for k, v in q_groups.items() if len(v) >= 2], key=lambda x: x["average"])[:8]
 
