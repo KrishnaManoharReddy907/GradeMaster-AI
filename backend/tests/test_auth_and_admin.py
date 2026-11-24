@@ -106,3 +106,18 @@ async def test_bootstrap_admin_only_once(client, world):
 async def test_malformed_ids_return_404_not_500(client, world):
     r = await client.get("/api/teacher/assessments/not-an-id", headers=auth(world.teacher))
     assert r.status_code == 404
+
+
+async def test_signup_options_public_and_signup_by_ids(client, world):
+    opts = (await client.get("/api/auth/signup-options")).json()
+    assert {d["id"] for d in opts["departments"]} and all(set(d) == {"id", "name", "code"} for d in opts["departments"])
+    section = next(s for s in opts["sections"] if s["id"] == world.section_a)
+    r = await client.post("/api/auth/signup", json={
+        "name": "Dropdown Student", "email": "dd@x.io", "password": "abc12345", "role": "student",
+        "department_id": section["department_id"], "section_id": section["id"], "year": section["year"]})
+    assert r.status_code == 201, r.text
+    # A section from another year is rejected.
+    r = await client.post("/api/auth/signup", json={
+        "name": "Wrong Year", "email": "wy@x.io", "password": "abc12345", "role": "student",
+        "department_id": section["department_id"], "section_id": section["id"], "year": (section["year"] % 4) + 1})
+    assert r.status_code == 400

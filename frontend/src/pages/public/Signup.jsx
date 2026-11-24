@@ -4,7 +4,7 @@ import { GraduationCap, Presentation } from 'lucide-react'
 import AuthLayout from './AuthLayout'
 import { Button, Callout, Field, Input, Select } from '@/components/ui'
 import { api } from '@/lib/api'
-import { useDocumentTitle } from '@/lib/hooks'
+import { useAsync, useDocumentTitle } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
 import { cn } from '@/lib/utils'
 
@@ -19,15 +19,21 @@ export default function Signup() {
   const navigate = useNavigate()
   const toast = useToast()
   const [role, setRole] = useState('student')
-  const [form, setForm] = useState({ name: '', email: '', password: '', department_name: '', year: '', section_name: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', department_id: '', year: '', section_id: '' })
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState(null)
   const [pending, setPending] = useState(false)
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+  const options = useAsync(() => api.auth.signupOptions(), [])
+  const sections = options.data?.sections || []
+  const deptSections = sections.filter((s) => s.department_id === form.department_id)
+  const years = [...new Set(deptSections.map((s) => s.year).filter(Boolean))].sort()
+  const yearSections = deptSections.filter((s) => String(s.year) === String(form.year))
+  const noCatalog = options.data && !options.data.departments.length
   const pwIssue = passwordIssue(form.password)
 
   const valid = useMemo(() => form.name.trim().length >= 2 && /\S+@\S+\.\S+/.test(form.email) && !pwIssue &&
-    (role !== 'student' || (form.department_name && form.year && form.section_name)), [form, role, pwIssue])
+    (role !== 'student' || (form.department_id && form.year && form.section_id)), [form, role, pwIssue])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -37,7 +43,7 @@ export default function Signup() {
     setPending(true)
     try {
       const body = { name: form.name, email: form.email, password: form.password, role }
-      if (role === 'student') Object.assign(body, { department_name: form.department_name.trim(), section_name: form.section_name.trim(), year: Number(form.year) })
+      if (role === 'student') Object.assign(body, { department_id: form.department_id, section_id: form.section_id, year: Number(form.year) })
       const res = await api.auth.signup(body)
       toast.success(res.message, 'Account created')
       navigate('/login')
@@ -72,21 +78,36 @@ export default function Signup() {
           {({ id, invalid }) => <Input id={id} invalid={invalid && touched} type="password" autoComplete="new-password" value={form.password} onChange={set('password')} />}
         </Field>
         {role === 'student' ? (
+          noCatalog ? <Callout tone="warn">Your institution has not set up departments and sections yet. Please check back later.</Callout>
+            : options.error ? <Callout tone="bad">Could not load departments. {options.error.message}</Callout> : (
           <div className="grid grid-cols-3 gap-3">
-            <Field label="Department" className="col-span-3" error={touched && !form.department_name ? 'Required' : null}>
-              {({ id, invalid }) => <Input id={id} invalid={invalid} placeholder="e.g. IT" value={form.department_name} onChange={set('department_name')} />}
-            </Field>
-            <Field label="Year" className="col-span-1" error={touched && !form.year ? 'Required' : null}>
+            <Field label="Department" className="col-span-3" error={touched && !form.department_id ? 'Required' : null}>
               {({ id, invalid }) => (
-                <Select id={id} invalid={invalid} value={form.year} onChange={set('year')}>
-                  <option value="">—</option>{[1, 2, 3, 4].map((y) => <option key={y} value={y}>{y}</option>)}
+                <Select id={id} invalid={invalid} value={form.department_id} disabled={options.loading}
+                  onChange={(e) => setForm({ ...form, department_id: e.target.value, year: '', section_id: '' })}>
+                  <option value="">{options.loading ? 'Loading…' : 'Select your department'}</option>
+                  {(options.data?.departments || []).map((d) => <option key={d.id} value={d.id}>{d.name}{d.code ? ` (${d.code})` : ''}</option>)}
                 </Select>
               )}
             </Field>
-            <Field label="Section" className="col-span-2" error={touched && !form.section_name ? 'Required' : null}>
-              {({ id, invalid }) => <Input id={id} invalid={invalid} placeholder="e.g. A" value={form.section_name} onChange={set('section_name')} />}
+            <Field label="Year" className="col-span-1" error={touched && !form.year ? 'Required' : null}>
+              {({ id, invalid }) => (
+                <Select id={id} invalid={invalid} value={form.year} disabled={!form.department_id}
+                  onChange={(e) => setForm({ ...form, year: e.target.value, section_id: '' })}>
+                  <option value="">—</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}
+                </Select>
+              )}
+            </Field>
+            <Field label="Section" className="col-span-2" error={touched && !form.section_id ? 'Required' : null}>
+              {({ id, invalid }) => (
+                <Select id={id} invalid={invalid} value={form.section_id} disabled={!form.year} onChange={set('section_id')}>
+                  <option value="">{form.year ? 'Select your section' : 'Choose a year first'}</option>
+                  {yearSections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </Select>
+              )}
             </Field>
           </div>
+          )
         ) : (
           <Callout tone="info">Faculty accounts are reviewed by an administrator. You can sign in once approved.</Callout>
         )}

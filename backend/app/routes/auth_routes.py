@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.deps import get_current_user  # re-exported for legacy imports
 from app.core.errors import Forbidden
 from app.core.security import create_access_token
+from app.database import get_database
 from app.schemas.user_schema import (
     AdminBootstrap,
     ChangePassword,
@@ -34,6 +35,17 @@ async def signup(user_data: UserCreate):
     if user.get("is_approved"):
         return MessageResponse(message="Account created. You can sign in now.")
     return MessageResponse(message="Account created. An administrator must approve it before you can sign in.")
+
+
+@router.get("/signup-options")
+async def signup_options():
+    """Public: departments and sections a student can pick when signing up (names only)."""
+    db = get_database()
+    departments = [{"id": str(d["_id"]), "name": d["name"], "code": d.get("code")}
+                   async for d in db.departments.find({}, {"name": 1, "code": 1}).sort("name", 1)]
+    sections = [{"id": str(s["_id"]), "name": s["name"], "year": s.get("year"), "department_id": s.get("department_id")}
+                async for s in db.sections.find({}, {"name": 1, "year": 1, "department_id": 1}).sort([("year", 1), ("name", 1)])]
+    return {"departments": departments, "sections": sections}
 
 
 @router.post("/bootstrap-admin", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)

@@ -95,6 +95,7 @@ export const api = {
   auth: {
     login: (email, password) => post('/api/auth/login', { email, password }),
     signup: (data) => post('/api/auth/signup', data),
+    signupOptions: () => get('/api/auth/signup-options'),
     me: () => get('/api/auth/me'),
     bootstrapAdmin: (data) => post('/api/auth/bootstrap-admin', data),
     changePassword: (current_password, password) => post('/api/auth/change-password', { current_password, password }),
