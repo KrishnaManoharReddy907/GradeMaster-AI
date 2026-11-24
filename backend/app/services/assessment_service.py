@@ -1,5 +1,6 @@
 """Assessment lifecycle: creation, status, visibility rules and student attempts."""
 
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -169,12 +170,29 @@ async def get_student_assessments(student: dict) -> List[dict]:
     return [_with_status(a) for a in rows]
 
 
-def sanitize_for_student(a: dict, reveal_answers: bool = False) -> dict:
-    """Strip answer keys, hidden test cases, model answers and rubrics."""
+def _seeded(*parts: str) -> random.Random:
+    return random.Random(":".join(parts))
+
+
+def sanitize_for_student(a: dict, reveal_answers: bool = False, student_id: Optional[str] = None) -> dict:
+    """Strip answer keys, hidden test cases, model answers and rubrics.
+
+    With ``student_id`` and the assessment's shuffle rules, MCQ questions and/or options are
+    put in a per-student order. The order is seeded by assessment + student, so it is stable
+    across reloads; grading uses ids, so order never affects scores.
+    """
+    rules = a.get("rules") or {}
+    aid = str(a.get("_id", ""))
+    source = list(a.get("mcq_questions", []))
+    if student_id and rules.get("shuffle_questions"):
+        _seeded(aid, student_id, "questions").shuffle(source)
     mcq = []
-    for q in a.get("mcq_questions", []):
+    for q in source:
+        options = [{"option_id": o["option_id"], "text": o["text"]} for o in q.get("options", [])]
+        if student_id and rules.get("shuffle_options"):
+            _seeded(aid, student_id, q["question_id"]).shuffle(options)
         item = {"question_id": q["question_id"], "question_text": q["question_text"],
-                "options": [{"option_id": o["option_id"], "text": o["text"]} for o in q.get("options", [])],
+                "options": options,
                 "marks": q.get("marks", 1), "difficulty": q.get("difficulty", "medium"), "topic": q.get("topic")}
         if reveal_answers:
             item["correct_option_id"] = q.get("correct_option_id")

@@ -232,6 +232,10 @@ export default function AssessmentBuilder() {
                   label="Show MCQ results immediately" description="Off: students see scores and answers after the assessment closes." />
                 <Toggle checked={draft.rules.allow_back_navigation} onChange={(v) => set({ rules: { ...draft.rules, allow_back_navigation: v } })}
                   label="Allow going back to earlier questions" />
+                <Toggle checked={draft.rules.shuffle_questions} onChange={(v) => set({ rules: { ...draft.rules, shuffle_questions: v } })}
+                  label="Shuffle question order" description="Each student gets their own order (stable if they reload)." />
+                <Toggle checked={draft.rules.shuffle_options} onChange={(v) => set({ rules: { ...draft.rules, shuffle_options: v } })}
+                  label="Shuffle answer options" description="Options appear in a different order for each student." />
               </>}
               <Toggle checked={draft.release_questions_after_deadline} onChange={(v) => set({ release_questions_after_deadline: v })}
                 label="Release the question paper after closing" description="Students can revise from it (MCQ answers included)." />

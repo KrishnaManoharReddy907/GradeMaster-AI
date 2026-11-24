@@ -113,3 +113,14 @@ async def test_delete_only_before_start(client, world):
     a = await world.assessment(client, "mcq")
     assert (await client.delete(f"/api/teacher/assessments/{a['id']}", headers=auth(world.other_teacher))).status_code == 403
     assert (await client.delete(f"/api/teacher/assessments/{a['id']}", headers=auth(world.teacher))).status_code == 200
+
+
+async def test_resume_returns_server_time_and_shuffled_order_is_stable(client, world):
+    a = await world.assessment(client, "mcq", rules={"shuffle_questions": True, "shuffle_options": True})
+    await world.open_now(a["id"])
+    assert (await client.post(f"/api/student/assessments/{a['id']}/start", headers=auth(world.student))).status_code == 200
+    first = (await client.get(f"/api/student/assessments/{a['id']}", headers=auth(world.student))).json()
+    again = (await client.get(f"/api/student/assessments/{a['id']}", headers=auth(world.student))).json()
+    assert first["attempt"]["server_time"] and first["attempt"]["deadline"]
+    assert first["mcq_questions"] == again["mcq_questions"]
+    assert {q["question_id"] for q in first["mcq_questions"]} == {"q1", "q2"}

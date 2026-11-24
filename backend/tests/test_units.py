@@ -42,3 +42,19 @@ def test_plagiarism_ignores_renaming_but_not_different_logic():
     fa, fb, fc = fingerprint(a), fingerprint(b), fingerprint(c)
     assert similarity(fa, fb) >= 0.9
     assert similarity(fa, fc) < 0.6
+
+
+def test_per_student_shuffle_is_stable_distinct_and_lossless():
+    from app.services.assessment_service import sanitize_for_student
+    a = {"_id": "a1", "rules": {"shuffle_questions": True, "shuffle_options": True},
+         "mcq_questions": [{"question_id": f"q{i}", "question_text": f"Q{i}", "correct_option_id": "a",
+                            "options": [{"option_id": o, "text": o.upper()} for o in "abcd"]} for i in range(8)]}
+    one = sanitize_for_student(a, student_id="s1")["mcq_questions"]
+    assert one == sanitize_for_student(a, student_id="s1")["mcq_questions"]          # stable across reloads
+    two = sanitize_for_student(a, student_id="s2")["mcq_questions"]
+    assert [q["question_id"] for q in one] != [q["question_id"] for q in two]       # differs per student
+    assert sorted(q["question_id"] for q in one) == [f"q{i}" for i in range(8)]     # nothing lost
+    assert all(sorted(o["option_id"] for o in q["options"]) == list("abcd") for q in one)
+    assert all("correct_option_id" not in q for q in one)                           # key still hidden
+    teacher_order = sanitize_for_student(a)["mcq_questions"]                        # no student: original order
+    assert [q["question_id"] for q in teacher_order] == [f"q{i}" for i in range(8)]

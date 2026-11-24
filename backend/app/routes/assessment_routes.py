@@ -142,8 +142,9 @@ async def get_student_assessment_detail_route(assessment_id: str, student: dict 
     attempt = await get_database().attempts.find_one(
         {"assessment_id": assessment_id, "student_id": str(student["_id"])})
     return {**_student_header(a, await svc.subject_names([a["subject_id"]])),
-            **svc.sanitize_for_student(a),
-            "attempt": {"started_at": attempt["started_at"], "deadline": attempt["deadline"]} if attempt else None}
+            **svc.sanitize_for_student(a, student_id=str(student["_id"])),
+            "attempt": {"started_at": attempt["started_at"], "deadline": attempt["deadline"],
+                        "server_time": svc.now_utc()} if attempt else None}
 
 
 @router.post("/student/assessments/{assessment_id}/start")
