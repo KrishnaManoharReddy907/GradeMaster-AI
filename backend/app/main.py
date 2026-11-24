@@ -14,6 +14,7 @@ from app.routes import (
     auth_routes,
     health,
     ocr_routes,
+    question_bank_routes,
     submission_routes,
     teacher_routes,
 )
@@ -62,5 +63,6 @@ app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(assessment_routes.router, prefix="/api", tags=["Assessments"])
 app.include_router(submission_routes.router, prefix="/api", tags=["Submissions"])
 app.include_router(teacher_routes.router, prefix="/api/teacher", tags=["Teacher review"])
+app.include_router(question_bank_routes.router, prefix="/api/teacher", tags=["Question bank & AI authoring"])
 app.include_router(analytics_routes.router, prefix="/api", tags=["Analytics & Reports"])
 app.include_router(ocr_routes.router, prefix="/api", tags=["Handwritten"])

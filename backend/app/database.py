@@ -118,10 +118,25 @@ async def _m003_support_collections(database) -> None:
     await database.audit_log.create_index([("created_at", DESCENDING)])
 
 
+async def _m004_bank_and_final_scores(database) -> None:
+    await database.question_bank.create_index([("owner_id", ASCENDING), ("subject_id", ASCENDING), ("created_at", DESCENDING)])
+    await database.question_bank.create_index([("subject_id", ASCENDING), ("shared", ASCENDING)])
+    # Legacy finalized handwritten submissions only stored teacher_adjusted_score.
+    async for sub in database.manual_submissions.find({"status": "finalized", "final_score": {"$exists": False}}):
+        ev = sub.get("manual_evaluation") or {}
+        score = sub.get("teacher_adjusted_score")
+        if score is None:
+            score = ev.get("total_score", 0)
+        total = ev.get("total_marks") or 0
+        await database.manual_submissions.update_one({"_id": sub["_id"]}, {"$set": {
+            "final_score": score, "final_percentage": round(score / total * 100, 2) if total else 0}})
+
+
 MIGRATIONS: List[Tuple[str, Callable[..., Awaitable[None]]]] = [
     ("001_indexes_and_dedupe", _m001_indexes),
     ("002_user_flags", _m002_user_flags),
     ("003_support_collections", _m003_support_collections),
+    ("004_question_bank_and_final_scores", _m004_bank_and_final_scores),
 ]
 
 
