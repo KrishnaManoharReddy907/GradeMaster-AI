@@ -154,7 +154,7 @@ they are not copied by these commands. Their transcribed text and grades are.
 | `ENABLE_API_DOCS` | no | dev on / prod off | Force `/api/docs` on or off |
 | `RATE_LIMIT_ENABLED` | no | `true` | In-memory per-IP limits (login, signup, uploads, AI) |
 | `GEMINI_API_KEY` | recommended | none | AI grading, explanations, OCR mapping, feedback, question drafts |
-| `GEMINI_MODEL` | no | `gemini-2.5-flash` | Gemini model id |
+| `GEMINI_MODEL` | no | `gemini-3.8-flash` | Gemini model id |
 | `LLM_PROVIDER` | no | `gemini` | `gemini`, `ollama` or `none` |
 | `GOOGLE_VISION_API_KEY` | no | none | Primary OCR; Gemini vision is the fallback |
 | `JUDGE0_API_URL` | no | `https://ce.judge0.com` | Code execution endpoint |

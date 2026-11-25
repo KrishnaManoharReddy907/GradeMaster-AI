@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # AI / external services
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     google_vision_api_key: Optional[str] = None
     judge0_api_url: str = "https://ce.judge0.com"
     judge0_api_key: Optional[str] = None

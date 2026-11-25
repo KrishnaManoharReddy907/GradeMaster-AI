@@ -115,20 +115,31 @@ async def _gemini_generate(contents: Any, *, system: Optional[str], temperature:
                            max_tokens: int, json_schema: Optional[dict]) -> str:
     from google.genai import types
 
-    config_kwargs: dict = {
-        "temperature": temperature,
-        "max_output_tokens": max_tokens,
-        "thinking_config": types.ThinkingConfig(thinking_budget=0),
-    }
+    config_kwargs: dict = {"temperature": temperature, "max_output_tokens": max_tokens}
+    # Keep "thinking" minimal for speed and cost. Gemini 2.5 uses a token budget; newer models use a level.
+    if settings.gemini_model.startswith("gemini-2.5"):
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    else:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
     if system:
         config_kwargs["system_instruction"] = system
     if json_schema is not None:
         config_kwargs["response_mime_type"] = "application/json"
         config_kwargs["response_schema"] = json_schema
-    response = await _gemini().aio.models.generate_content(
-        model=settings.gemini_model, contents=contents,
-        config=types.GenerateContentConfig(**config_kwargs),
-    )
+    try:
+        response = await _gemini().aio.models.generate_content(
+            model=settings.gemini_model, contents=contents,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # A model that rejects the thinking setting still works without it.
+        if "thinking" not in str(exc).lower():
+            raise
+        config_kwargs.pop("thinking_config", None)
+        response = await _gemini().aio.models.generate_content(
+            model=settings.gemini_model, contents=contents,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
     text = getattr(response, "text", None)
     if not text:
         raise LLMUnavailable("Model returned an empty response")
@@ -153,7 +164,7 @@ async def probe() -> dict:
     if not is_configured():
         return {"status": "not_configured", "detail": "GEMINI_API_KEY is not set on the server"}
     try:
-        text = await generate_text("Reply with the single word: ok", max_tokens=8, timeout=25)
+        text = await generate_text("Reply with the single word: ok", max_tokens=256, timeout=40)
         return {"status": "ok", "detail": f"model {settings.gemini_model} replied", "reply": text.strip()[:20]}
     except LLMUnavailable as exc:
         return {"status": "down", "detail": _redact(str(exc))}
