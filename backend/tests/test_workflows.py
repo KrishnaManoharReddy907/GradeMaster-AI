@@ -88,3 +88,18 @@ async def test_ai_probe_reports_reason(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "gemini_api_key", None)
     assert (await llm.probe())["status"] == "not_configured"
+
+
+async def test_probe_times_out_quickly_with_clear_message(monkeypatch):
+    import asyncio
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key-not-real")
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(60)
+    monkeypatch.setattr(llm, "_gemini_generate", hang)
+    real_retry = llm._retry
+    monkeypatch.setattr(llm, "_retry", lambda fn, attempts=1, timeout=20: real_retry(fn, attempts=attempts, timeout=0.2))
+    result = await llm.probe()
+    assert result["status"] == "down" and "no reply from the model" in result["detail"]

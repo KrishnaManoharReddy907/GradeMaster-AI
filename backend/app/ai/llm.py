@@ -59,7 +59,9 @@ def _gemini():
         raise LLMUnavailable("GEMINI_API_KEY is not configured")
     if _gemini_client is None:
         from google import genai
-        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
+        from google.genai import types
+        _gemini_client = genai.Client(api_key=settings.gemini_api_key,
+                                      http_options=types.HttpOptions(timeout=120_000))  # milliseconds
     return _gemini_client
 
 
@@ -96,13 +98,19 @@ async def _retry(fn, attempts: int = 3, timeout: float = 60.0):
     for i in range(attempts):
         try:
             return await asyncio.wait_for(fn(), timeout=timeout)
+        except asyncio.TimeoutError:
+            last = TimeoutError(f"no reply from the model within {timeout:g} s (it may be overloaded; try again later)")
+            if i == attempts - 1:
+                break
+            await asyncio.sleep(1.5 * (2 ** i))
+            continue
         except LLMUnavailable as exc:
             _record_failure(exc)
             raise
         except Exception as exc:  # noqa: BLE001
             last = exc
             msg = f"{type(exc).__name__} {exc}".lower()
-            transient = isinstance(exc, asyncio.TimeoutError) or any(k in msg for k in _TRANSIENT)
+            transient = isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or any(k in msg for k in _TRANSIENT)
             if not transient or i == attempts - 1:
                 break
             await asyncio.sleep(1.5 * (2 ** i))
@@ -112,7 +120,7 @@ async def _retry(fn, attempts: int = 3, timeout: float = 60.0):
 
 
 async def _gemini_generate(contents: Any, *, system: Optional[str], temperature: float,
-                           max_tokens: int, json_schema: Optional[dict]) -> str:
+                           max_tokens: int, json_schema: Optional[dict], thinking: str = "low") -> str:
     from google.genai import types
 
     config_kwargs: dict = {"temperature": temperature, "max_output_tokens": max_tokens}
@@ -120,7 +128,8 @@ async def _gemini_generate(contents: Any, *, system: Optional[str], temperature:
     if settings.gemini_model.startswith("gemini-2.5"):
         config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
     else:
-        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+        level = types.ThinkingLevel.MINIMAL if thinking == "minimal" else types.ThinkingLevel.LOW
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=level)
     if system:
         config_kwargs["system_instruction"] = system
     if json_schema is not None:
@@ -164,7 +173,12 @@ async def probe() -> dict:
     if not is_configured():
         return {"status": "not_configured", "detail": "GEMINI_API_KEY is not set on the server"}
     try:
-        text = await generate_text("Reply with the single word: ok", max_tokens=256, timeout=40)
+        if settings.llm_provider == "gemini":
+            text = await _retry(lambda: _gemini_generate("Reply with the single word: ok", system=None, temperature=0.0,
+                                                         max_tokens=256, json_schema=None, thinking="minimal"),
+                                attempts=1, timeout=20)
+        else:
+            text = await generate_text("Reply with the single word: ok", max_tokens=256, timeout=20)
         return {"status": "ok", "detail": f"model {settings.gemini_model} replied", "reply": text.strip()[:20]}
     except LLMUnavailable as exc:
         return {"status": "down", "detail": _redact(str(exc))}
