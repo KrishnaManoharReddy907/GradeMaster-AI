@@ -9,7 +9,7 @@ from app.core.deps import (
     require_staff,
     require_student,
 )
-from app.core.errors import NotFound
+from app.core.errors import Conflict, NotFound
 from app.database import get_database
 from app.schemas.submission_schema import (
     CodingSubmissionCreate,
@@ -248,3 +248,26 @@ async def review_manual_submission(submission_id: str, review: ManualTeacherRevi
                        submission_id, {"final_score": updated.get("final_score")})
     student = (await _users_by_id([updated["student_id"]])).get(updated["student_id"], {})
     return {"message": "Review saved", "status": updated["status"], "submission": _manual_detail(updated, assessment, student)}
+
+
+@router.post("/teacher/manual-submission/{submission_id}/re-evaluate")
+async def re_evaluate_manual_submission(submission_id: str, teacher: dict = Depends(require_staff)):
+    """Run AI + keyword scoring again (e.g. after an AI outage). Not allowed once finalized."""
+    from app.services.manual_evaluation_service import evaluate_all
+
+    sub, assessment = await load_owned_submission("manual_submissions", submission_id, teacher)
+    if sub.get("status") == "finalized":
+        raise Conflict("This submission is finalized and can no longer be re-scored")
+    evaluation = await evaluate_all(assessment.get("manual_questions") or [], sub.get("student_answers") or {},
+                                    ocr_confidence=(sub.get("ocr") or {}).get("avg_confidence"))
+    db = get_database()
+    await db.manual_submissions.update_one({"_id": sub["_id"], "status": {"$ne": "finalized"}}, {"$set": {
+        "manual_evaluation": {k: evaluation[k] for k in ("results", "total_score", "total_marks", "percentage")},
+        "review_flags": evaluation["flags"], "status": "evaluated",
+        "teacher_adjusted_score": None, "final_score": None,
+    }})
+    await record_audit(teacher, "manual.re_evaluate", "manual_submission", submission_id,
+                       {"total_score": evaluation["total_score"], "flags": evaluation["flags"]})
+    updated = await db.manual_submissions.find_one({"_id": sub["_id"]})
+    student = (await _users_by_id([updated["student_id"]])).get(updated["student_id"], {})
+    return {"message": "Re-scored", "submission": _manual_detail(updated, assessment, student)}

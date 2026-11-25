@@ -94,6 +94,12 @@ keyword-only score flagged for teacher review, and code feedback falls back to r
 
 ## 5. Verify the deployment
 
+**AI check:** sign in as admin and open **Overview → System health**. The **Gemini AI** row makes a real test call.
+If it says *Not working*, the red text underneath is the exact reason (e.g. missing key, invalid key, API not
+enabled). Fix it in **grademaster-api → Environment → `GEMINI_API_KEY`** (paste only the key, no quotes or spaces),
+save, and let the service redeploy. Submissions graded during an outage can then be re-scored with
+**Re-run AI scoring** (handwritten) or **Re-run evaluation** (coding).
+
 Run these from any terminal (replace the URLs):
 
 ```bash
@@ -124,7 +130,12 @@ they are not copied by these commands. Their transcribed text and grades are.
 
 ## 7. Updating and rolling back
 
-* `autoDeploy` is off: deploy a new version from the Render dashboard (**Manual Deploy → Deploy latest commit**).
+* **Automatic deploys are on** (`autoDeploy: true`): every push to the deployed branch (`main`) rebuilds and redeploys
+  both services. No action is needed after a commit; watch progress under each service's **Events**.
+* Check the branch once: **Render → each service → Settings → Build & Deploy → Branch** should be `main` and
+  **Auto-Deploy** should be **On Commit**. (If you created the services from the feature branch, switch the branch to
+  `main` there, or under **Blueprints → grademaster → Settings**.)
+* Deploy by hand any time with **Manual Deploy → Deploy latest commit**.
 * Roll back with **Events → (previous deploy) → Rollback**.
 * Rotating `JWT_SECRET` signs everyone out. Rotating the Atlas password requires updating `MONGO_URI`.
 

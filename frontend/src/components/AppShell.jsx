@@ -4,6 +4,7 @@ import {
   BarChart3, BookMarked, Building2, ClipboardCheck, ClipboardList, FileClock, GraduationCap, Inbox, KeyRound,
   LayoutDashboard, LibraryBig, LogOut, Menu, Moon, ScrollText, Sun, UserCheck, Users, X,
 } from 'lucide-react'
+import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useTheme } from '@/lib/ui-state'
 import { Avatar } from './ui'
@@ -12,7 +13,7 @@ import { cn } from '@/lib/utils'
 const NAV = {
   admin: [
     { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
-    { to: '/admin/approvals', label: 'Approvals', icon: UserCheck },
+    { to: '/admin/approvals', label: 'Approvals', icon: UserCheck, counter: 'approvals' },
     { to: '/admin/users', label: 'People', icon: Users },
     { to: '/admin/academics', label: 'Academics', icon: Building2 },
     { to: '/admin/assignments', label: 'Teaching assignments', icon: ClipboardList },
@@ -21,7 +22,7 @@ const NAV = {
   teacher: [
     { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/teacher/assessments', label: 'Assessments', icon: ClipboardCheck },
-    { to: '/teacher/review', label: 'Review queue', icon: Inbox },
+    { to: '/teacher/review', label: 'Review queue', icon: Inbox, counter: 'queue' },
     { to: '/teacher/bank', label: 'Question bank', icon: LibraryBig },
     { to: '/teacher/analytics', label: 'Class analytics', icon: BarChart3 },
   ],
@@ -32,6 +33,8 @@ const NAV = {
     { to: '/student/progress', label: 'My progress', icon: GraduationCap },
   ],
 }
+
+const PORTAL_LABEL = { admin: 'Administration', teacher: 'Teaching workspace', student: 'Student space' }
 
 const ROLE_LABEL = { admin: 'Administrator', faculty: 'Faculty', teacher: 'Faculty', hod: 'Head of department', student: 'Student' }
 
@@ -105,16 +108,55 @@ export default function AppShell({ portal }) {
 
   const handleLogout = () => { logout(); navigate('/login') }
 
+  // Live counters on the nav (refreshed on navigation): items waiting for the user's attention.
+  const [counts, setCounts] = useState({})
+  useEffect(() => {
+    let alive = true
+    const load = portal === 'teacher' ? api.teacher.queue().then((q) => ({ queue: q.total }))
+      : portal === 'admin' ? api.admin.overview().then((o) => ({ approvals: o.pending_approvals })) : null
+    load?.then((c) => alive && setCounts(c)).catch(() => {})
+    return () => { alive = false }
+  }, [portal, location.pathname])
+
   const nav = (
-    <nav className="flex flex-1 flex-col gap-0.5 p-3" aria-label="Main">
+    <nav className="flex flex-1 flex-col gap-1 px-3 pb-3" aria-label="Main">
+      <p className="eyebrow px-3 pb-1.5 pt-2">{PORTAL_LABEL[portal]}</p>
       {items.map((it) => (
         <NavLink key={it.to} to={it.to} end={it.end}
-          className={({ isActive }) => cn('flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13.5px] font-medium transition-colors',
+          className={({ isActive }) => cn('group relative flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.5px] font-medium transition-colors',
             isActive ? 'bg-brand-soft text-brand' : 'text-ink-2 hover:bg-surface-2 hover:text-ink')}>
-          <it.icon className="h-[18px] w-[18px]" aria-hidden />{it.label}
+          {({ isActive }) => (<>
+            {isActive && <span className="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-brand" aria-hidden />}
+            <span className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors',
+              isActive ? 'bg-brand text-brand-ink shadow-card' : 'bg-surface-2 text-ink-3 group-hover:text-ink')}>
+              <it.icon className="h-4 w-4" aria-hidden />
+            </span>
+            <span className="flex-1 truncate">{it.label}</span>
+            {it.counter && counts[it.counter] > 0 && (
+              <span className="tabular min-w-5 rounded-full bg-warn px-1.5 text-center text-[11px] font-semibold leading-5 text-white"
+                aria-label={`${counts[it.counter]} waiting`}>{counts[it.counter] > 99 ? '99+' : counts[it.counter]}</span>
+            )}
+          </>)}
         </NavLink>
       ))}
     </nav>
+  )
+
+  const profile = user && (
+    <div className="m-3 space-y-3">
+      <div className="rounded-xl border border-line bg-gradient-to-br from-brand-soft to-surface p-3 text-[12px] leading-relaxed text-ink-2">
+        <span className="font-semibold text-brand">AI suggests, teachers decide.</span> Every grade is confirmed by a teacher before it counts.
+      </div>
+      <div className="flex items-center gap-2.5 rounded-xl px-1">
+        <Avatar name={user.name} />
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="truncate text-[13px] font-medium">{user.name}</p>
+          <p className="truncate text-[11.5px] text-ink-3">{ROLE_LABEL[user.role] || user.role}</p>
+        </div>
+        <button onClick={handleLogout} aria-label="Sign out" title="Sign out"
+          className="grid h-8 w-8 place-items-center rounded-lg text-ink-3 hover:bg-bad-soft hover:text-bad"><LogOut className="h-4 w-4" /></button>
+      </div>
+    </div>
   )
 
   return (
@@ -122,11 +164,9 @@ export default function AppShell({ portal }) {
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">Skip to content</a>
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
-        <div className="flex h-15 items-center px-5"><Link to={items[0].to}><Logo /></Link></div>
-        {nav}
-        <div className="m-3 rounded-xl bg-surface-2 p-3 text-[12px] text-ink-3">
-          AI suggests, teachers decide. Every grade is confirmed by a teacher before it counts.
-        </div>
+        <div className="flex h-15 items-center border-b border-line px-5"><Link to={items[0].to}><Logo /></Link></div>
+        <div className="flex flex-1 flex-col overflow-y-auto pt-2">{nav}</div>
+        {profile}
       </aside>
       {/* Mobile drawer */}
       {drawer && (
@@ -137,7 +177,8 @@ export default function AppShell({ portal }) {
               <Logo />
               <button onClick={() => setDrawer(false)} aria-label="Close menu" className="p-1 text-ink-3"><X className="h-5 w-5" /></button>
             </div>
-            {nav}
+            <div className="flex flex-1 flex-col overflow-y-auto">{nav}</div>
+            {profile}
           </aside>
         </div>
       )}

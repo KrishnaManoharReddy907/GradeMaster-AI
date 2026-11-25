@@ -62,7 +62,8 @@ export function ExamShell({ title, subtitle, remaining, onSubmit, submitting, su
 /** Instructions screen shown before the clock starts. */
 export function StartGate({ assessment, onStart, starting, kind }) {
   const timed = Boolean(assessment.duration_minutes)
-  const counts = { mcq: assessment.mcq_questions?.length, coding: assessment.coding_questions?.length, manual: assessment.manual_questions?.length }
+  const counts = { mcq: assessment.mcq_questions?.length, coding: assessment.coding_questions?.length, manual: assessment.manual_questions?.length,
+    mixed: `${assessment.mcq_questions?.length || 0} MCQ + ${assessment.coding_questions?.length || 0} coding` }
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 animate-in">
       <Link to="/student/assessments" className="mb-4 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" />Assessments</Link>

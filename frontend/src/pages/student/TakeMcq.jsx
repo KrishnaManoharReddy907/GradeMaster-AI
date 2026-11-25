@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Bookmark, ChevronLeft, ChevronRight, Eraser } from 'lucide-react'
 import { Badge, Button, ConfirmDialog, ErrorState, PageSkeleton } from '@/components/ui'
 import { api } from '@/lib/api'
@@ -59,6 +59,7 @@ export default function TakeMcq() {
 
   if (a.loading) return <div className="p-8"><PageSkeleton /></div>
   if (a.error) return <div className="p-8"><ErrorState error={a.error} onRetry={a.reload} /></div>
+  if (a.data.assessment_type === 'mixed') return <Navigate to={`/student/take/mixed/${id}`} replace />
   if (!attempt) return <StartGate assessment={a.data} kind="mcq" onStart={start} starting={starting} />
 
   return (

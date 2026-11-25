@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronLeft, ChevronRight, FileImage, Lock, Quote, ScanText, Sparkles } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, FileImage, Lock, Quote, ScanText, Sparkles, RefreshCw } from 'lucide-react'
 import {
   Badge, Button, Callout, Card, CardBody, CardHeader, ConfirmDialog, EmptyState, ErrorState, Field, FlagChips, Input, PageHeader, PageSkeleton,
   ScorePill, Spinner, SubmissionStatus, Textarea,
@@ -54,6 +54,7 @@ export default function ManualReview() {
   const [feedback, setFeedback] = useState('')
   const [saving, setSaving] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  const [rescoring, setRescoring] = useState(false)
 
   useEffect(() => {
     if (!sub.data) return
@@ -83,11 +84,23 @@ export default function ManualReview() {
     } catch (err) { toast.error(err) } finally { setSaving(false) }
   }
 
+  const rescore = async () => {
+    setRescoring(true)
+    try {
+      const res = await api.teacher.reEvaluateManual(id)
+      const flags = res.submission?.review_flags || []
+      if (flags.includes('ai_unavailable')) toast.warning('AI scoring is still unavailable. Ask your administrator to check “Gemini AI” on the admin overview.')
+      else toast.success('Re-scored with AI. Check the suggestions below.')
+      sub.reload()
+    } catch (err) { toast.error(err) } finally { setRescoring(false) }
+  }
+
   return (
     <>
       <PageHeader title={s.student_name} description={`${s.assessment_title} · submitted ${fmtDateTime(s.submitted_at)}`}
         back={<Link to={`/teacher/assessments/${s.assessment_id}`} className="mb-2 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" />Back to assessment</Link>}
-        actions={<SubmissionStatus status={s.status} />} />
+        actions={<>{!finalized && <Button variant="secondary" size="sm" icon={RefreshCw} loading={rescoring} onClick={rescore}>Re-run AI scoring</Button>}
+          <SubmissionStatus status={s.status} /></>} />
       {s.review_flags?.length > 0 && <div className="mb-4"><FlagChips flags={s.review_flags} max={6} /></div>}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_1.15fr]">

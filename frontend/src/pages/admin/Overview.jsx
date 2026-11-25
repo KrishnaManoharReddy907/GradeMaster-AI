@@ -11,15 +11,19 @@ import { TYPE_LABELS } from '@/lib/utils'
 function ServiceRow({ icon: Icon, name, info, optional }) {
   const ok = info?.status === 'ok' || info?.status === 'configured'
   const missing = info?.status === 'not_configured'
+  const problem = !ok && !optional && typeof info?.detail === 'string' ? info.detail : null
   return (
-    <li className="flex items-center justify-between gap-3 py-2.5">
-      <span className="flex items-center gap-2.5"><Icon className="h-4 w-4 text-ink-3" />{name}{optional && <span className="text-[12px] text-ink-3">optional</span>}</span>
-      <span className="flex items-center gap-2">
-        {info?.latency_ms !== undefined && ok && <span className="tabular text-[12px] text-ink-3">{info.latency_ms} ms</span>}
-        {ok ? <Badge tone="good" icon={CheckCircle2}>{info.status === 'configured' ? 'Configured' : 'Healthy'}</Badge>
-          : missing ? <Badge tone={optional ? 'neutral' : 'warn'}>Not configured</Badge>
-            : <Badge tone={optional ? 'neutral' : 'bad'} icon={XCircle}>{optional ? 'Offline' : 'Unreachable'}</Badge>}
-      </span>
+    <li className="py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2.5"><Icon className="h-4 w-4 text-ink-3" />{name}{optional && <span className="text-[12px] text-ink-3">optional</span>}</span>
+        <span className="flex items-center gap-2">
+          {info?.latency_ms !== undefined && ok && <span className="tabular text-[12px] text-ink-3">{info.latency_ms} ms</span>}
+          {ok ? <Badge tone="good" icon={CheckCircle2}>{info.status === 'configured' ? 'Configured' : 'Healthy'}</Badge>
+            : missing ? <Badge tone={optional ? 'neutral' : 'warn'}>Not configured</Badge>
+              : <Badge tone={optional ? 'neutral' : 'bad'} icon={XCircle}>{optional ? 'Offline' : 'Not working'}</Badge>}
+        </span>
+      </div>
+      {problem && <p className="mt-1.5 break-words rounded-lg bg-bad-soft px-2.5 py-1.5 text-[12px] text-bad">{problem}</p>}
     </li>
   )
 }

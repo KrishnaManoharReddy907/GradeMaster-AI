@@ -290,7 +290,8 @@ async def get_student_submission_list(student_id: str) -> List[dict]:
             "assessment_id": aid, "assessment_title": a.get("title", "Deleted assessment"),
             "assessment_type": a.get("assessment_type", kind), "subject_name": names.get(a.get("subject_id")),
             "total_marks": a.get("total_marks", 0), "score": None, "status": "submitted",
-            "submitted_at": None, "parts": [],
+            "submitted_at": None, "parts": [], "closes_at": a.get("end_time"),
+            "assessment_status": a.get("status"),
         })
 
     for s in mcq:
@@ -317,10 +318,22 @@ async def get_student_submission_list(student_id: str) -> List[dict]:
 
     for r in rows.values():
         parts = r["parts"]
-        if parts and all(p["status"] == "graded" for p in parts):
+        graded = [p for p in parts if p["status"] == "graded"]
+        if parts and len(graded) == len(parts):
             r["status"] = "graded"
             r["score"] = round(sum(p["score"] or 0 for p in parts), 2)
             r["max_score"] = round(sum(p["max"] or 0 for p in parts), 2)
+        elif graded:
+            # Some parts released (e.g. finalised coding) while others wait (e.g. MCQ until closing).
+            r["status"] = "partial"
+            r["graded_score"] = round(sum(p["score"] or 0 for p in graded), 2)
+            r["graded_max"] = round(sum(p["max"] or 0 for p in graded), 2)
         elif any(p["status"] == "in_review" for p in parts):
             r["status"] = "in_review"
+        a = assessments.get(r["assessment_id"], {})
+        expected = (1 if a.get("mcq_questions") else 0) + len(a.get("coding_questions") or [])             + (1 if a.get("manual_questions") else 0)
+        r["parts_expected"] = expected
+        r["complete"] = len(parts) >= expected
+        if any(p["type"] == "mcq" and p["status"] == "submitted" for p in parts):
+            r["note"] = "MCQ score and answers are released when the assessment closes."
     return sorted(rows.values(), key=lambda r: r["submitted_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)

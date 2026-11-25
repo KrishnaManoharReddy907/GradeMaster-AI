@@ -144,6 +144,7 @@ export const api = {
     mcq: (id) => get(`/api/teacher/mcq-submission/${id}`),
     manual: (id) => get(`/api/teacher/manual-submission/${id}`),
     reviewManual: (id, data) => put(`/api/teacher/manual-submission/${id}/review`, data),
+    reEvaluateManual: (id) => post(`/api/teacher/manual-submission/${id}/re-evaluate`),
     queue: () => get('/api/teacher/review-queue'),
     plagiarism: (id) => get(`/api/teacher/assessments/${id}/plagiarism`),
     compare: (a, b) => get('/api/teacher/plagiarism/compare', { a, b }),

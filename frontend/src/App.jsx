@@ -40,6 +40,7 @@ const StudentDashboard = page(() => import('./pages/student/Dashboard'))
 const StudentAssessments = page(() => import('./pages/student/Assessments'))
 const TakeMcq = page(() => import('./pages/student/TakeMcq'))
 const TakeCoding = page(() => import('./pages/student/TakeCoding'))
+const TakeMixed = page(() => import('./pages/student/TakeMixed'))
 const TakeHandwritten = page(() => import('./pages/student/TakeHandwritten'))
 const Results = page(() => import('./pages/student/Results'))
 const ResultDetail = page(() => import('./pages/student/ResultDetail'))
@@ -114,6 +115,7 @@ export default function App() {
           {/* Exam screens: full-screen, no navigation chrome. */}
           <Route path="/student/take/mcq/:id" element={<RequireRole roles={['student']}><TakeMcq /></RequireRole>} />
           <Route path="/student/take/coding/:id" element={<RequireRole roles={['student']}><TakeCoding /></RequireRole>} />
+          <Route path="/student/take/mixed/:id" element={<RequireRole roles={['student']}><TakeMixed /></RequireRole>} />
           <Route path="/student/take/handwritten/:id" element={<RequireRole roles={['student']}><TakeHandwritten /></RequireRole>} />
 
           <Route path="/account" element={<RequireRole><AccountShell /></RequireRole>}>

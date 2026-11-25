@@ -31,6 +31,25 @@ class LLMUnavailable(Exception):
     """The model could not produce a usable answer (not configured, outage, bad output)."""
 
 
+# Most recent failure, shown to admins on the system-health page (secrets redacted).
+last_error: dict = {}
+
+
+def _redact(text: str) -> str:
+    text = str(text)
+    for secret in (settings.gemini_api_key, settings.google_vision_api_key):
+        if secret:
+            text = text.replace(secret, "***")
+    return re.sub(r"AIza[0-9A-Za-z_\-]{20,}", "***", text)[:400]
+
+
+def _record_failure(exc: Exception) -> str:
+    from datetime import datetime, timezone
+    message = _redact(f"{type(exc).__name__}: {exc}")
+    last_error.update(message=message, at=datetime.now(timezone.utc).isoformat())
+    return message
+
+
 _gemini_client = None
 
 
@@ -77,7 +96,8 @@ async def _retry(fn, attempts: int = 3, timeout: float = 60.0):
     for i in range(attempts):
         try:
             return await asyncio.wait_for(fn(), timeout=timeout)
-        except LLMUnavailable:
+        except LLMUnavailable as exc:
+            _record_failure(exc)
             raise
         except Exception as exc:  # noqa: BLE001
             last = exc
@@ -86,8 +106,9 @@ async def _retry(fn, attempts: int = 3, timeout: float = 60.0):
             if not transient or i == attempts - 1:
                 break
             await asyncio.sleep(1.5 * (2 ** i))
-    logger.warning("LLM call failed: %s", type(last).__name__ if last else "unknown")
-    raise LLMUnavailable(f"AI service unavailable ({type(last).__name__ if last else 'error'})")
+    message = _record_failure(last) if last else "unknown error"
+    logger.warning("LLM call failed: %s", message)
+    raise LLMUnavailable(f"AI service unavailable ({message})")
 
 
 async def _gemini_generate(contents: Any, *, system: Optional[str], temperature: float,
@@ -125,6 +146,17 @@ async def _ollama_generate(prompt: str, *, system: Optional[str], temperature: f
         r = await client.post(f"{settings.ollama_host.rstrip('/')}/api/chat", json=body)
         r.raise_for_status()
         return r.json()["message"]["content"]
+
+
+async def probe() -> dict:
+    """Make one tiny real call so admins can see whether AI works and, if not, why."""
+    if not is_configured():
+        return {"status": "not_configured", "detail": "GEMINI_API_KEY is not set on the server"}
+    try:
+        text = await generate_text("Reply with the single word: ok", max_tokens=8, timeout=25)
+        return {"status": "ok", "detail": f"model {settings.gemini_model} replied", "reply": text.strip()[:20]}
+    except LLMUnavailable as exc:
+        return {"status": "down", "detail": _redact(str(exc))}
 
 
 async def generate_text(prompt: str, *, system: Optional[str] = None, temperature: float = 0.3,

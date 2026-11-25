@@ -8,7 +8,9 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.133-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![MongoDB](https://img.shields.io/badge/MongoDB-GridFS-47A248?logo=mongodb&logoColor=white)](https://mongodb.com)
-[![Tests](https://img.shields.io/badge/tests-59%20backend%20%C2%B7%2019%20frontend-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-63%20backend%20%C2%B7%2019%20frontend-brightgreen)](#testing)
+
+**Live:** https://grademaster-web.onrender.com (free hosting; the first load after idle can take about a minute)
 
 [Features](#features) · [Architecture](#architecture) · [Quick start](#quick-start) · [Deployment](#deployment) · [Documentation](#documentation)
 
@@ -24,6 +26,7 @@ GradeMaster runs three kinds of assessment in one platform and evaluates them wi
 |---|---|
 | **MCQ** | Graded instantly and exactly. Results are released immediately or after closing, with AI explanations for wrong answers |
 | **Coding** | Student code runs in the Judge0 sandbox against public and hidden tests. Partial marks, bug analysis, a structural plagiarism check and AI feedback with a minimal fix |
+| **Mixed** | MCQ and coding in one exam with one timer and one submit |
 | **Handwritten** | Photos or PDFs are read by OCR (Cloud Vision, with a Gemini fallback) and mapped to questions. The student corrects the text, then rubric-aware AI and keyword coverage pre-grade it |
 
 Automated scores are **suggestions**. Coding and handwritten grades reach students only after a teacher reviews and
@@ -103,7 +106,7 @@ handwritten answers get keyword-only provisional scores flagged for the teacher,
 ## Testing
 
 ```bash
-cd backend && pytest -q        # 59 tests: auth, authorization, exams, evaluation, review, analytics, hardening
+cd backend && pytest -q        # 63 tests: auth, authorization, exams, evaluation, review, analytics, hardening
 cd frontend && npm test        # 19 tests: API client, route guards, charts, exam timer, formatters
 ```
 
@@ -119,7 +122,7 @@ step-by-step account setup, environment variables, first sign-in and verificatio
 
 | Document | Contents |
 |---|---|
-| [docs/MASTER_DOCUMENTATION.md](docs/MASTER_DOCUMENTATION.md) | Full technical documentation: architecture, data model, all 75 API endpoints, workflows, algorithms, security, testing |
+| [docs/MASTER_DOCUMENTATION.md](docs/MASTER_DOCUMENTATION.md) | Full technical documentation: architecture, data model, all 76 API endpoints, workflows, algorithms, security, testing |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting guide and environment reference |
 | [docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md) | Audit of the original codebase and how the findings were addressed |
 | [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md) | Current status and next steps |

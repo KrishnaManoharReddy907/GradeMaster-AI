@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, BarChart3, BookmarkPlus, CalendarClock, CheckCheck, Download, FileText, Fingerprint, ListChecks, Play, Trash2, Users,
+  ArrowLeft, BarChart3, BookmarkPlus, CalendarClock, CheckCheck, CircleDot, Download, FileText, Fingerprint, ListChecks, Play, Trash2, Users,
 } from 'lucide-react'
 import {
   AssessmentStatus, Badge, Button, Callout, Card, CardBody, CardHeader, ConfirmDialog, EmptyState, ErrorState, Field, FlagChips, Input,
@@ -11,7 +11,7 @@ import { BarList, ChartCard, ColumnChart } from '@/components/charts'
 import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
-import { fmtDateTime, fmtPct, fromNow, optionLabel } from '@/lib/utils'
+import { cn, fmtDateTime, fmtPct, fromNow, optionLabel } from '@/lib/utils'
 
 const toLocalInput = (v) => {
   const d = new Date(v)
@@ -23,47 +23,96 @@ function openPath(s) {
   return s.type === 'coding' ? `/teacher/coding/${s.id}` : s.type === 'manual' ? `/teacher/manual/${s.id}` : `/teacher/mcq/${s.id}`
 }
 
+const partDone = (p) => p.type === 'mcq' || p.status === 'finalized'
+
+/** One row per student: an assessment can have several parts (MCQ, each coding problem, handwritten). */
+function groupByStudent(subs, assessment) {
+  const by = new Map()
+  for (const s of subs) {
+    const g = by.get(s.student_id) || { student_id: s.student_id, student_name: s.student_name, student_email: s.student_email, parts: [] }
+    g.parts.push(s)
+    by.set(s.student_id, g)
+  }
+  const order = { mcq: 0, coding: 1, manual: 2 }
+  const codingIndex = (qid) => assessment.coding_questions.findIndex((q) => q.question_id === qid)
+  return [...by.values()].map((g) => {
+    g.parts.sort((a, b) => order[a.type] - order[b.type] || codingIndex(a.question_id) - codingIndex(b.question_id))
+    const expected = (assessment.mcq_questions.length ? 1 : 0) + assessment.coding_questions.length + (assessment.manual_questions.length ? 1 : 0)
+    const score = g.parts.reduce((t, p) => t + (Number(p.score) || 0), 0)
+    const allDone = g.parts.every(partDone)
+    return {
+      ...g, score, missing: Math.max(0, expected - g.parts.length),
+      provisional: !allDone,
+      status: g.parts.some((p) => p.status === 'failed') ? 'failed' : allDone ? 'complete' : 'review',
+      flags: [...new Set(g.parts.flatMap((p) => p.review_flags || []))],
+      submitted_at: g.parts.map((p) => p.submitted_at).filter(Boolean).sort().at(-1),
+      next: g.parts.find((p) => !partDone(p)) || g.parts[0],
+    }
+  })
+}
+
+function partLabel(p, assessment) {
+  if (p.type === 'mcq') return 'MCQ'
+  if (p.type === 'manual') return 'Handwritten'
+  const i = assessment.coding_questions.findIndex((q) => q.question_id === p.question_id)
+  return assessment.coding_questions.length > 1 ? `Code ${i + 1}` : 'Code'
+}
+
 function SubmissionsTab({ assessment, subs, reload }) {
   const navigate = useNavigate()
   const toast = useToast()
   const [filter, setFilter] = useState('all')
   const [busy, setBusy] = useState(null)
-  const rows = useMemo(() => subs.filter((s) => filter === 'all' || (filter === 'review' ? ['evaluated', 'reviewed', 'failed', 'pending'].includes(s.status) && s.type !== 'mcq'
-    : filter === 'flagged' ? s.review_flags?.length : s.status === 'finalized' || s.type === 'mcq')), [subs, filter])
+  const students = useMemo(() => groupByStudent(subs, assessment), [subs, assessment])
+  const match = (g, f) => f === 'all' || (f === 'review' ? g.status !== 'complete' : f === 'flagged' ? g.flags.length > 0 : g.status === 'complete')
+  const rows = students.filter((g) => match(g, filter))
 
-  const evaluateOne = async (e, s) => {
+  const evaluatePending = async (e, g) => {
     e.stopPropagation()
-    setBusy(s.id)
-    try { await api.teacher.evaluate(s.id); toast.info('Evaluation queued. Refresh in a moment to see results.'); setTimeout(reload, 4000) }
-    catch (err) { toast.error(err) } finally { setBusy(null) }
+    setBusy(g.student_id)
+    try {
+      for (const p of g.parts.filter((x) => x.type === 'coding' && ['pending', 'failed'].includes(x.status))) await api.teacher.evaluate(p.id)
+      toast.info('Evaluation queued. Refresh in a moment to see results.'); setTimeout(reload, 4000)
+    } catch (err) { toast.error(err) } finally { setBusy(null) }
   }
-
-  const count = (f) => subs.filter((s) => (f === 'review' ? ['evaluated', 'reviewed', 'failed', 'pending'].includes(s.status) && s.type !== 'mcq'
-    : f === 'flagged' ? s.review_flags?.length : s.status === 'finalized' || s.type === 'mcq')).length
 
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 p-4">
         <Segmented value={filter} onChange={setFilter} options={[
-          { value: 'all', label: 'All', count: subs.length }, { value: 'review', label: 'Needs review', count: count('review') },
-          { value: 'flagged', label: 'Flagged', count: count('flagged') }, { value: 'done', label: 'Final', count: count('done') }]} />
-        <span className="text-[13px] text-ink-3">Click a row to open it.</span>
+          { value: 'all', label: 'All', count: students.length }, { value: 'review', label: 'Needs review', count: students.filter((g) => match(g, 'review')).length },
+          { value: 'flagged', label: 'Flagged', count: students.filter((g) => match(g, 'flagged')).length },
+          { value: 'done', label: 'Complete', count: students.filter((g) => match(g, 'done')).length }]} />
+        <span className="text-[13px] text-ink-3">One row per student. Click a part to open it.</span>
       </div>
-      <Table rows={rows} onRowClick={(s) => navigate(openPath(s))}
+      <Table rows={rows} rowKey="student_id" onRowClick={(g) => navigate(openPath(g.next))}
         empty={<EmptyState icon={Users} title={subs.length ? 'Nothing in this view' : 'No submissions yet'}
           description={subs.length ? undefined : assessment.status === 'upcoming' ? 'Opens ' + fmtDateTime(assessment.start_time) : 'Students’ work will appear here.'} />}
         columns={[
-          { key: 'student', header: 'Student', render: (s) => <div><p className="font-medium">{s.student_name}</p><p className="text-[12.5px] text-ink-3">{s.student_email}</p></div> },
-          ...(assessment.assessment_type === 'mixed' || assessment.coding_questions.length > 1 ? [{ key: 'part', header: 'Part', render: (s) => (
-            s.type === 'coding' ? <span className="text-ink-2">Code · {assessment.coding_questions.find((q) => q.question_id === s.question_id)?.title || s.question_id}</span> : <TypeBadge type={s.type} />) }] : []),
-          { key: 'status', header: 'Status', render: (s) => <SubmissionStatus status={s.status} mcq={s.type === 'mcq'} /> },
-          { key: 'score', header: 'Score', render: (s) => (
-            <div><ScorePill score={s.score} max={s.total_marks ?? s.max_marks} />
-              {s.type !== 'mcq' && s.status !== 'finalized' && s.score !== null && s.score !== undefined && <p className="text-[11.5px] text-ink-3">AI provisional</p>}</div>) },
-          { key: 'flags', header: 'Flags', render: (s) => <FlagChips flags={s.review_flags || []} max={2} /> },
-          { key: 'when', header: 'Submitted', render: (s) => <span className="text-ink-3">{fromNow(s.submitted_at)}</span> },
-          { key: 'act', header: '', align: 'right', render: (s) => s.type === 'coding' && ['pending', 'failed'].includes(s.status) && (
-            <Button size="sm" variant="secondary" icon={Play} loading={busy === s.id} onClick={(e) => evaluateOne(e, s)}>Evaluate</Button>) },
+          { key: 'student', header: 'Student', render: (g) => <div><p className="font-medium">{g.student_name}</p><p className="text-[12.5px] text-ink-3">{g.student_email}</p></div> },
+          { key: 'parts', header: 'Parts', render: (g) => (
+            <div className="flex flex-wrap gap-1.5">
+              {g.parts.map((p) => (
+                <button key={p.id} type="button" onClick={(e) => { e.stopPropagation(); navigate(openPath(p)) }}
+                  title={`${partLabel(p, assessment)}: ${p.type === 'mcq' ? 'auto-graded' : p.status}`}
+                  className={cn('inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[12px] font-medium transition-colors hover:bg-surface-2',
+                    partDone(p) ? 'border-good/40 text-good' : p.status === 'failed' ? 'border-bad/40 text-bad' : 'border-warn/40 text-warn')}>
+                  {partDone(p) ? <CheckCheck className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+                  {partLabel(p, assessment)}
+                  <span className="tabular text-ink-2">{p.score ?? '—'}/{p.total_marks ?? p.max_marks}</span>
+                </button>
+              ))}
+              {g.missing > 0 && <Badge tone="neutral">{g.missing} not submitted</Badge>}
+            </div>) },
+          { key: 'status', header: 'Status', render: (g) => g.status === 'complete' ? <Badge tone="good" icon={CheckCheck}>Complete</Badge>
+            : g.status === 'failed' ? <SubmissionStatus status="failed" /> : <SubmissionStatus status="needs_review" /> },
+          { key: 'score', header: 'Total', render: (g) => (
+            <div><ScorePill score={g.score} max={assessment.total_marks} />
+              {g.provisional && <p className="text-[11.5px] text-ink-3">includes AI suggestions</p>}</div>) },
+          { key: 'flags', header: 'Flags', render: (g) => <FlagChips flags={g.flags} max={2} /> },
+          { key: 'when', header: 'Submitted', render: (g) => <span className="text-ink-3">{fromNow(g.submitted_at)}</span> },
+          { key: 'act', header: '', align: 'right', render: (g) => g.parts.some((p) => p.type === 'coding' && ['pending', 'failed'].includes(p.status)) && (
+            <Button size="sm" variant="secondary" icon={Play} loading={busy === g.student_id} onClick={(e) => evaluatePending(e, g)}>Evaluate</Button>) },
         ]} />
     </>
   )
@@ -216,7 +265,7 @@ export default function AssessmentWorkspace() {
             ['Status', <AssessmentStatus key="s" status={a.status} />], ['Type', <TypeBadge key="t" type={a.assessment_type} />],
             ['Subject', a.subject_name], ['Total marks', `${a.total_marks} · ${a.question_count} questions`],
             ['Opens', fmtDateTime(a.start_time)], ['Closes', fmtDateTime(a.end_time)],
-            ['Time per student', a.duration_minutes ? `${a.duration_minutes} min` : 'Untimed'], ['Submissions', subs.length],
+            ['Time per student', a.duration_minutes ? `${a.duration_minutes} min` : 'Untimed'], ['Students submitted', new Set(subs.map((x) => x.student_id)).size],
           ]} />
         </CardBody></Card>
         <Card className="flex flex-row flex-wrap items-center gap-2 p-4 lg:flex-col lg:items-stretch">
@@ -230,7 +279,7 @@ export default function AssessmentWorkspace() {
       <Card>
         <div className="px-4 pt-2">
           <Tabs value={tab} onChange={setTab} tabs={[
-            { value: 'submissions', label: 'Submissions', icon: Users, count: subs.length },
+            { value: 'submissions', label: 'Submissions', icon: Users, count: new Set(subs.map((x) => x.student_id)).size },
             ...(hasCoding ? [{ value: 'plagiarism', label: 'Similarity', icon: Fingerprint }] : []),
             { value: 'insights', label: 'Insights', icon: BarChart3 },
             { value: 'questions', label: 'Questions', icon: ListChecks, count: a.question_count },

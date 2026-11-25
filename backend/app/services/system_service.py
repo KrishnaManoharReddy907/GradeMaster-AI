@@ -44,7 +44,16 @@ async def _ollama():
 
 
 async def system_health() -> dict:
-    mongo, judge0, ollama = await asyncio.gather(_timed(_mongo()), _timed(_judge0()), _timed(_ollama()))
+    from app.ai import llm
+
+    async def gemini_probe():
+        started = time.perf_counter()
+        result = await llm.probe()
+        return result | {"latency_ms": round((time.perf_counter() - started) * 1000),
+                         "last_error": llm.last_error or None}
+
+    mongo, judge0, ollama, gemini = await asyncio.gather(
+        _timed(_mongo()), _timed(_judge0()), _timed(_ollama()), gemini_probe())
     db = get_database()
     jobs = {r["_id"]: r["n"] async for r in db.jobs.aggregate([{"$group": {"_id": "$status", "n": {"$sum": 1}}}])}
     return {
@@ -52,7 +61,7 @@ async def system_health() -> dict:
         "services": {
             "database": mongo,
             "judge0": judge0,
-            "gemini": {"status": "configured" if settings.gemini_api_key else "not_configured"},
+            "gemini": gemini,
             "google_vision": {"status": "configured" if settings.google_vision_api_key else "not_configured"},
             "ollama": ollama | {"optional": True},
         },

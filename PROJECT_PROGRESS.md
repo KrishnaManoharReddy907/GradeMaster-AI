@@ -46,7 +46,7 @@ _Last updated: 2026-11-25 (session 1, continued; all phases implemented except t
 * Design system in `components/ui/` (primitives + domain badges); charts in `components/charts.jsx` with a Chart/Table toggle on every chart.
 * Portals: admin (overview, approvals, people, academics, assignments, audit), teacher (dashboard, builder, workspace, coding/manual/MCQ review, similarity compare, review queue, question bank, class analytics, student profile, report), student (dashboard, timed MCQ/coding/handwritten exams with server-clock deadline, results, released paper, progress).
 * Removed: old pages/components, placeholder images, Plotly.
-* Tests: `npm test` (Vitest, 19: api client, route guards, charts, deadline clock, formatters). Backend: `pytest` 59 passing.
+* Tests: `npm test` (Vitest, 19: api client, route guards, charts, deadline clock, formatters). Backend: `pytest` 63 passing.
 * Visual QA by headless Chrome screenshots (desktop, dark mode, 390 px mobile); no page errors.
 * Analytics: `hardest_questions[]` now includes `question_text`.
 
@@ -62,6 +62,14 @@ _Last updated: 2026-11-25 (session 1, continued; all phases implemented except t
 * MCQ `shuffle_questions` / `shuffle_options` now enforced per student (seeded, stable); builder toggles added.
 * Exam resume returns `server_time` so the timer keeps its clock-skew correction.
 * Documentation: `docs/MASTER_DOCUMENTATION.md` (50 sections, generated API table), new `README.md`.
+
+## Owner-testing fixes (2026-11-25)
+* Modal focus bug (typing lost focus after every letter in every dialog) fixed in `Modal`.
+* Mixed assessments are one exam (`TakeMixed.jsx`): one timer, Part A MCQ + Part B coding, one submit; teacher workspace groups parts per student; student results show "Partly graded".
+* Keywords pasted as "a, b, c" are split (builder, API, grader incl. legacy data).
+* Admin System health runs a live Gemini probe and shows the exact error; teachers can Re-run AI scoring on handwritten work.
+* Rule-based feedback no longer prints a wrong "Score awarded" line; sidebar redesigned with live counters.
+* Deployed: https://grademaster-web.onrender.com (API https://grademaster-api-g6ow.onrender.com); auto-deploy on push to `main`.
 
 ## Data migrations
 Applied to `grademaster_dev` only. One duplicate MCQ submission was moved to `submission_duplicates_archive`.

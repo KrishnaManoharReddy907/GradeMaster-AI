@@ -152,7 +152,8 @@ async def ai_evaluate(question: dict, student_answer: str, max_marks: float) -> 
 async def evaluate_answer(question: dict, student_answer: str) -> dict:
     qid = question.get("question_id", "")
     max_marks = float(question.get("marks", 0))
-    keywords = question.get("keywords") or []
+    # Older assessments may hold a comma-separated list as a single keyword.
+    keywords = [k.strip() for raw in (question.get("keywords") or []) for k in re.split(r"[,;\n]+", raw) if k.strip()]
     answer = (student_answer or "").strip()
     base = {"question_id": qid, "max_marks": max_marks, "topic": question.get("topic")}
 

@@ -168,17 +168,22 @@ export function CodingEditor({ q, set, ...frame }) {
 
 function KeywordInput({ value, onChange }) {
   const [draft, setDraft] = useState('')
-  const add = () => {
-    const k = draft.trim()
-    if (k && !value.includes(k)) onChange([...value, k])
+  // Commas, semicolons and new lines separate keywords, so a pasted list becomes separate keywords.
+  const add = (text = draft) => {
+    const next = [...value]
+    text.split(/[,;\n]+/).map((k) => k.trim().replace(/\s+/g, ' ')).filter(Boolean)
+      .forEach((k) => { if (!next.some((x) => x.toLowerCase() === k.toLowerCase())) next.push(k) })
+    if (next.length !== value.length) onChange(next)
     setDraft('')
   }
   return (
     <div>
       <div className="flex gap-2">
-        <Input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Add keyword" placeholder="e.g. LIFO   (synonyms: CPU|processor)"
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add() } }} />
-        <Button type="button" variant="secondary" onClick={add}>Add</Button>
+        <Input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Add keyword" placeholder="e.g. LIFO, push, pop   (synonyms: CPU|processor)"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add() } }}
+          onBlur={() => draft.trim() && add()}
+          onPaste={(e) => { const t = e.clipboardData.getData('text'); if (/[,;\n]/.test(t)) { e.preventDefault(); add(draft + t) } }} />
+        <Button type="button" variant="secondary" onClick={() => add()}>Add</Button>
       </div>
       {value.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">

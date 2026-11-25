@@ -229,7 +229,6 @@ def generate_rule_feedback(
         feedback_parts.append("Note: Moderate similarity detected with other submissions.")
 
     # Score feedback
-    feedback_parts.append(f"Score awarded: {score} marks.")
 
     # Motivation
     if passed_tests == total_tests and total_tests > 0:

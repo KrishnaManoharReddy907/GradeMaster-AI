@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { CheckCircle2, Circle, Send } from 'lucide-react'
 import { Badge, Button, Callout, ConfirmDialog, ErrorState, PageSkeleton, Select } from '@/components/ui'
 import { CodeEditor, LANGUAGE_LABEL } from '@/components/code'
@@ -89,6 +89,7 @@ export default function TakeCoding() {
 
   if (a.loading) return <div className="p-8"><PageSkeleton /></div>
   if (a.error) return <div className="p-8"><ErrorState error={a.error} onRetry={a.reload} /></div>
+  if (assessment.assessment_type === 'mixed') return <Navigate to={`/student/take/mixed/${id}`} replace />
   if (!attempt) return <StartGate assessment={assessment} kind="coding" onStart={async () => {
     setStarting(true); try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) } }} starting={starting} />
 

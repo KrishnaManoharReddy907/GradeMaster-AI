@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -101,7 +102,8 @@ class ManualQuestionSchema(BaseModel):
     @classmethod
     def _keywords(cls, value: List[str]) -> List[str]:
         out, seen = [], set()
-        for k in value:
+        parts = [p for k in value for p in re.split(r"[,;\n]+", k)]  # "a, b, c" is three keywords
+        for k in parts:
             k = " ".join(k.split())
             if k and k.lower() not in seen:
                 seen.add(k.lower())

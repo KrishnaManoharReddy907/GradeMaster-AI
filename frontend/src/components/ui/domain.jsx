@@ -36,6 +36,7 @@ const SUBMISSION_STATUS = {
   submitted: { tone: 'neutral', label: 'Submitted', icon: Clock },
   in_review: { tone: 'info', label: 'In review', icon: Clock },
   graded: { tone: 'good', label: 'Graded', icon: CheckCircle2 },
+  partial: { tone: 'brand', label: 'Partly graded', icon: CheckCircle2 },
 }
 
 export function SubmissionStatus({ status, mcq }) {

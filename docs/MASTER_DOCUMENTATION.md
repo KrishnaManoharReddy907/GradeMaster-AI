@@ -388,7 +388,7 @@ Validation failures return **422** with an additional `errors[]` array. Other co
 409 `conflict`, 413 `payload_too_large`, 429 `rate_limited` (with `Retry-After`), 503 `service_unavailable`.
 Interactive OpenAPI docs are served at `/api/docs` in development (disabled in production by default).
 
-The tables below are generated from the application's route table (75 endpoints). "Teacher" means an approved
+The tables below are generated from the application's route table (76 endpoints). "Teacher" means an approved
 faculty/teacher/HOD account or an admin. Resource-level ownership checks apply on top of the role check: a teacher can
 only open assessments they own, and students only their own submissions.
 
@@ -466,6 +466,7 @@ only open assessments they own, and students only their own submissions.
 | GET | `/api/teacher/mcq-submission/{submission_id}` | Teacher (approved staff) or admin |  |
 | GET | `/api/teacher/manual-submission/{submission_id}` | Teacher (approved staff) or admin |  |
 | PUT | `/api/teacher/manual-submission/{submission_id}/review` | Teacher (approved staff) or admin |  |
+| POST | `/api/teacher/manual-submission/{submission_id}/re-evaluate` | Teacher (approved staff) or admin | Run AI + keyword scoring again (e.g. after an AI outage). Not allowed once finalized. |
 
 #### Teacher review
 
@@ -586,7 +587,7 @@ Malformed ids are treated as not found (404), so probing ids reveals nothing.
 | Dashboard | Items awaiting review (with flag counts), live and upcoming assessments, class average and pass rate, weakest topics, recent assessments. |
 | Assessments | All of the teacher's assessments with status, type and submission counts. |
 | Assessment builder | Four steps. **Type**: MCQ, coding, handwritten or mixed. **Details and audience**: subject, sections from the teacher's assignments, time window, time per student, instructions. **Questions**: an editor per type; insert from the question bank or draft with AI. **Settings**: result release, back navigation, shuffling, question-paper release, partial marks, auto-grading. A live checklist blocks publishing until the assessment is valid. Drafts persist in the browser. |
-| Assessment workspace | Tabs: **Submissions** (filters: needs review, flagged, final), **Similarity** (pairwise code similarity per question), **Insights** (report), **Questions** (read-only). Actions: finalise all coding, open the report, download a PDF, save questions to the bank, reschedule, delete. |
+| Assessment workspace | Tabs: **Submissions** (one row per student with clickable part chips and a combined total; filters: needs review, flagged, complete), **Similarity** (pairwise code similarity per question), **Insights** (report), **Questions** (read-only). Actions: finalise all coding, open the report, download a PDF, save questions to the bank, reschedule, delete. |
 | Coding review | Submitted code; test results (hidden tests show only pass or fail); suggested score and accuracy; flags; AI feedback and a suggested minimal fix; plagiarism match. The teacher enters a score and comment, then saves a draft or finalises, or re-runs evaluation. |
 | Handwritten review | Original answer sheets (images or PDF, streamed from GridFS). Per question: the transcribed answer, semantic and keyword sub-scores, matched and missed keywords, rubric evidence, AI confidence and flags. The teacher sets per-question scores and comments, then finalises; the submission is immutable afterwards. |
 | MCQ submission | Per-question choice against the correct answer, with marks. |
@@ -603,8 +604,8 @@ Malformed ids are treated as not found (404), so probing ids reveals nothing.
 |---|---|
 | Dashboard | Live and upcoming assessments with countdowns, recent results, average and focus topics. |
 | Assessments | Everything assigned to the student's section, with status and the right action (start, resume, view result). |
-| Exam views | Full-screen MCQ, coding and handwritten flows with a server-synchronised timer, draft autosave, a leave-page guard and auto-submit at time-out. |
-| Results | One row per assessment with its parts (MCQ, coding, manual) and a status: submitted → in review → graded. |
+| Exam views | Full-screen MCQ, coding, handwritten and **mixed** flows with a server-synchronised timer, draft autosave, a leave-page guard and auto-submit at time-out. A mixed assessment is one exam: Part A (MCQ) and Part B (coding) share one timer and one *Submit assessment* action. |
+| Results | One row per assessment with its parts (MCQ, coding, manual) and a status: submitted → in review → partly graded → graded. *Partly graded* shows the released score so far (e.g. finalised coding) while MCQ results wait for closing. |
 | Result detail | Released MCQ answers with explanations; finalised coding feedback and test results; handwritten per-question scores and comments. |
 | Released paper | The question paper (with MCQ answers) after the assessment closes, if the teacher allowed it. |
 | My progress | Graded results over time against the class average, topic mastery, results by subject, focus areas, strengths, terms often missed, recurring coding issues, and a PDF report. |
@@ -636,6 +637,15 @@ Malformed ids are treated as not found (404), so probing ids reveals nothing.
 4. **Review.** The teacher sees everything on one screen, sets the final score and a comment, and saves or finalises.
    *Finalise coding* in the workspace finalises every evaluated or reviewed submission at its current score.
 5. **Release.** Students see coding scores and feedback only after finalisation.
+
+### 22.1 Mixed (MCQ + coding) assessments
+
+A mixed assessment is a single exam. The student presses *Start* once; one attempt record holds one personal
+deadline for both parts. The exam view shows *Part A · Multiple choice* and *Part B · coding problems* as sections;
+the student can move between them freely. *Submit assessment* (or time-out) submits the MCQ answers and every
+non-empty coding draft together. If a part was somehow left unsubmitted while the window is still open, the
+assessment stays under *Open* with a *Continue* button. Teachers see one row per student with each part as a chip;
+results show *Partly graded* until every part is released.
 
 ## 23. Handwritten assignment workflow
 
@@ -699,7 +709,8 @@ Key details (`services/ocr_service.py`):
 Each descriptive answer is scored by two independent signals, which are then combined
 (`services/manual_evaluation_service.py`).
 
-**(a) Keyword coverage.** Teacher keywords are matched on word boundaries after light stemming (e.g. *queues → queue*,
+**(a) Keyword coverage.** Keywords may be typed one at a time or pasted as a comma-, semicolon- or newline-separated
+list; the builder, the API and the grader all split such lists into separate keywords. Teacher keywords are matched on word boundaries after light stemming (e.g. *queues → queue*,
 *processed → process*). Multi-word phrases must appear in order, and `a|b` accepts synonyms.
 `keyword_score = matched / total_keywords × max_marks`. Without keywords, this signal is absent.
 
@@ -1027,6 +1038,8 @@ are fixed and covered by tests (e.g. `test_forged_token_with_old_default_secret_
 
 | Failure | Behaviour |
 |---|---|
+| Diagnosing AI problems | Admin *System health* makes a live Gemini call and shows the exact (redacted) error; the last failure is recorded |
+| Recovering after an AI outage | Teachers can *Re-run AI scoring* on handwritten work and *Re-run evaluation* on coding work (not after finalisation) |
 | Gemini unavailable / not configured | Manual answers get a provisional keyword score + `ai_unavailable`; code feedback becomes rule-based + `ai_feedback_unavailable`; MCQ explanations skipped; AI mapping falls back to pattern segmentation; AI authoring returns 503 with a clear message |
 | Transient AI errors (429/5xx/timeouts) | Up to 3 attempts with exponential backoff (1.5 s, 3 s) |
 | Vision unavailable | Gemini vision transcribes the page |
@@ -1054,8 +1067,9 @@ deterministic fake; Gemini by monkeypatched gateway functions where needed.
 | `test_coding_and_manual.py` | 13 | Auto-evaluation; partial marks; outage → failed; zero score survives finalise; lock; max-score validation; cross-teacher isolation; feedback visibility; symmetric plagiarism; AI outage flagged not zeroed; manual eligibility/duplicates; per-question review and finalise; review queue + analytics; student analytics and teacher profile access |
 | `test_question_bank.py` | 7 | Add/list/dedupe/delete; validation; import; AI drafts validated; rubric marks sum; subject assignment; 503 when unconfigured |
 | `test_hardening.py` | 4 | Client IP with/without trusted proxy; security headers; setup token |
+| `test_workflows.py` | 4 | Mixed assessment as one result with partial status and completeness; comma-separated keywords split (new and legacy data); teacher re-scoring after an AI outage (ownership, finalised lock); AI probe |
 | `test_units.py` | 7 | Output normalisation; keyword matching; injection detection/fencing; JSON extraction; regex segmentation; plagiarism vs. renaming; shuffle properties |
-| **Total** | **59** | **59 passed** (≈ 85 s) |
+| **Total** | **63** | **63 passed** |
 
 **Frontend** (Vitest + Testing Library, jsdom): 19 tests in 5 files covering the API client (auth header, error
 normalisation, network errors, 401 handling), route guards (sign-in redirect, role isolation, loading state), charts
@@ -1104,8 +1118,9 @@ flowchart LR
   `JWT_SECRET` and `BOOTSTRAP_TOKEN` are generated by Render.
 * `backend/Dockerfile`: Python 3.13 slim, pinned dependencies, unprivileged user, health check, single worker.
 * The frontend is a static build with SPA rewrites and security headers.
-* **Status**: configuration complete and verified locally (Docker production mode, CSP test). Live deployment requires
-  the owner's MongoDB Atlas, Gemini and Render accounts; step-by-step instructions are in `docs/DEPLOYMENT.md`.
+* **Status**: deployed on Render from the GitHub repository: frontend `https://grademaster-web.onrender.com`, API
+  `https://grademaster-api-g6ow.onrender.com`, database on MongoDB Atlas. Auto-deploy is enabled, so every push to
+  `main` redeploys both services. Instructions: `docs/DEPLOYMENT.md`.
 
 ## 41. Environment configuration
 
@@ -1198,7 +1213,7 @@ Open `http://localhost:5173/setup` to create the first administrator. Optional e
 * **Python-only precise AST**: other languages use heuristic structure analysis.
 * **Free hosting** sleeps when idle (cold start ≈ 1 minute); the public Judge0 instance is shared and rate-limited.
 * **Legacy uploads** from the old version stored on local disk are not migrated into GridFS.
-* **Live deployment** is not yet performed (accounts pending), so production behaviour is unverified.
+* **Production load** beyond a single class has not been measured; the free Render plan sleeps when idle.
 
 ## 46. Future enhancements
 
@@ -1284,6 +1299,6 @@ the repetitive work: running code, reading handwriting, checking rubrics, spotti
 class performance. Teachers keep the decisions. The system is explicit about uncertainty: outages, low confidence and
 suspicious input become flags and review priorities rather than silent errors. Security issues found in the audit have
 been fixed and are guarded by tests. The redesigned interface makes the workflows fast for teachers and calm for
-students. The application is tested (59 backend and 19 frontend automated tests, plus integration and visual checks)
+students. The application is tested (63 backend and 19 frontend automated tests, plus integration and visual checks)
 and packaged for deployment. The remaining step is to go live on the owner's hosting accounts and gather real-world
 feedback, starting with OCR accuracy and AI-teacher score agreement, to tune the evaluation further.

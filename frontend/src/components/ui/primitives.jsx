@@ -300,19 +300,29 @@ export function KeyValue({ items, className }) {
 
 export function Modal({ open, onClose, title, description, children, footer, size = 'md' }) {
   const panel = useRef(null)
+  // Keep the latest onClose without re-running the open/close effect. Callers usually pass an
+  // inline arrow, and re-running on every render stole focus from inputs after each keystroke.
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose })
   useEffect(() => {
     if (!open) return undefined
     const prev = document.activeElement
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    const onKey = (e) => { if (e.key === 'Escape') closeRef.current?.() }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
-    setTimeout(() => panel.current?.querySelector('input,textarea,select,button')?.focus(), 30)
+    const t = setTimeout(() => {
+      const body = panel.current?.querySelector('[data-modal-body]')
+      const target = body?.querySelector('input:not([type=hidden]):not([disabled]),textarea:not([disabled]),select:not([disabled])')
+        || panel.current?.querySelector('button')
+      target?.focus()
+    }, 30)
     return () => {
+      clearTimeout(t)
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
       prev?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
   if (!open) return null
   const widths = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-6xl' }
   return createPortal(
@@ -326,7 +336,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"><X className="h-4 w-4" /></button>
         </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div data-modal-body className="overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
       </div>
     </div>,

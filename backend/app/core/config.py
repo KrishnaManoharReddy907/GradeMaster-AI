@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
     max_pdf_pages: int = 20
 
+    @field_validator("gemini_api_key", "google_vision_api_key", "judge0_api_key", "bootstrap_token", mode="before")
+    @classmethod
+    def _clean_secret(cls, value):
+        # Pasted keys often carry spaces, newlines or quotes; treat blank as unset.
+        if isinstance(value, str):
+            value = value.strip().strip('"').strip("'").strip()
+            return value or None
+        return value
+
     @field_validator("jwt_secret")
     @classmethod
     def _secret_must_be_strong(cls, value: str) -> str:
