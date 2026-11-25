@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle, usePersistentState } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
 import { cn } from '@/lib/utils'
-import { ExamShell, StartGate, useDeadline, useLeaveGuard } from './exam'
+import { enterFullscreen, ExamShell, isProctored, ProctorOverlay, StartGate, useDeadline, useLeaveGuard, useProctoring } from './exam'
 
 const TEMPLATES = {
   python: '# Read input with input() and print the answer.\n\n',
@@ -38,7 +38,7 @@ export default function TakeCoding() {
   const assessment = a.data?.assessment
   const questions = assessment?.coding_questions || []
   const allowed = assessment?.coding_config?.allowed_languages || ['python']
-  useEffect(() => { if (a.data) { setSubmitted(a.data.submitted); if (a.data.assessment.attempt) setAttempt(a.data.assessment.attempt) } }, [a.data])
+  useEffect(() => { if (a.data) { setSubmitted(a.data.submitted); if (a.data.assessment.attempt) setAttempt({ ...a.data.assessment.attempt, resumed: true }) } }, [a.data])
   useLeaveGuard(Boolean(attempt) && submitted.size < questions.length)
 
   const q = questions[current]
@@ -67,7 +67,7 @@ export default function TakeCoding() {
   }
 
   // Time up: submit every unsubmitted question that has a draft.
-  const autoSubmitAll = useCallback(async () => {
+  const autoSubmitAll = useCallback(async (reason = 'time') => {
     setBusy(true)
     for (const qq of questions) {
       const d = drafts[qq.question_id]
@@ -76,11 +76,12 @@ export default function TakeCoding() {
       }
     }
     clearDrafts()
-    toast.warning('Time’s up. Your saved code was submitted automatically.')
+    toast.warning(reason === 'proctor' ? 'Submitted after repeated proctoring violations. Your saved code was submitted.' : 'Time’s up. Your saved code was submitted automatically.')
     navigate(`/student/results/${id}`, { replace: true })
   }, [questions, drafts, submitted, submitOne, clearDrafts, navigate, id, toast])
 
   useEffect(() => { if (attempt && remaining !== null && remaining <= 0 && !busy) autoSubmitAll() }, [remaining, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
+  const proctor = useProctoring({ assessmentId: id, assessment, attempt, onTerminate: () => autoSubmitAll('proctor') })
 
   const usesStdin = useMemo(() => {
     const c = draft.code || ''
@@ -91,13 +92,14 @@ export default function TakeCoding() {
   if (a.error) return <div className="p-8"><ErrorState error={a.error} onRetry={a.reload} /></div>
   if (assessment.assessment_type === 'mixed') return <Navigate to={`/student/take/mixed/${id}`} replace />
   if (!attempt) return <StartGate assessment={assessment} kind="coding" onStart={async () => {
-    setStarting(true); try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) } }} starting={starting} />
+    setStarting(true); if (isProctored(assessment)) enterFullscreen(); try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) } }} starting={starting} />
 
   const done = submitted.has(q.question_id)
   return (
     <ExamShell title={assessment.title} subtitle={`${submitted.size} of ${questions.length} submitted`} remaining={remaining}
       submitLabel={submitted.size === questions.length ? 'Finish' : 'Finish'} submitting={false}
       onSubmit={() => (submitted.size === questions.length ? navigate(`/student/results/${id}`) : setConfirm('finish'))} saved="Drafts saved on this device">
+      <ProctorOverlay proctor={proctor} remaining={remaining} />
       <div className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">
         {questions.length > 1 && (
           <nav className="mb-4 flex gap-2 overflow-x-auto" aria-label="Problems">

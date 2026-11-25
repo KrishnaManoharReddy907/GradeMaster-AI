@@ -291,6 +291,9 @@ async def check_submission_window(student: dict, assessment: dict) -> None:
         # 2-minute network grace after the personal deadline.
         if now > make_aware(attempt["deadline"]) + timedelta(minutes=2):
             raise Forbidden("Your time for this assessment is over")
+        # Proctoring limit reached: only the automatic submission (2-minute grace) is accepted.
+        if attempt.get("terminated_at") and now > make_aware(attempt["terminated_at"]) + timedelta(minutes=2):
+            raise Forbidden("This attempt was closed after repeated proctoring violations")
         return
     if now > make_aware(assessment["end_time"]) + timedelta(minutes=2):
         raise Forbidden("The submission deadline has passed")

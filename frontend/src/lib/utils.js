@@ -54,6 +54,7 @@ export const FLAG_LABELS = {
   low_ai_confidence: 'Low AI confidence',
   execution_incomplete: 'Some tests did not run',
   evaluation_failed: 'Evaluation failed',
+  left_exam: 'Left the exam window',
 }
 
 export const initials = (name = '') =>

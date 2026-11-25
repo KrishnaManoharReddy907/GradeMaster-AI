@@ -6,6 +6,7 @@ import {
   ScorePill, SubmissionStatus, Textarea,
 } from '@/components/ui'
 import { CodeView, LANGUAGE_LABEL } from '@/components/code'
+import ProctoringCard from '@/components/ProctoringCard'
 import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle, useJobPoll } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
@@ -127,6 +128,7 @@ export default function CodingReview() {
         </div>
 
         <div className="space-y-6 xl:sticky xl:top-20 xl:self-start">
+          <ProctoringCard proctoring={s.proctoring} />
           <Card>
             <CardHeader title="Grade" description={finalized ? 'Finalized and visible to the student.' : 'The AI score is a suggestion. Your score is what counts.'} />
             <CardBody className="space-y-4">

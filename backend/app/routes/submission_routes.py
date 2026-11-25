@@ -22,6 +22,7 @@ from app.services.assessment_service import get_assessment_by_id
 from app.services.audit_service import record_audit
 from app.services.evaluation_service import queue_assessment_evaluation
 from app.services.review_service import review_manual
+from app.services import proctoring_service as proctor
 from app.services.submission_service import (
     get_student_submission_list,
     get_student_submission_status,
@@ -126,20 +127,23 @@ async def batch_evaluate_assessment_route(assessment_id: str, teacher: dict = De
 
 @router.get("/teacher/submissions/assessment/{assessment_id}")
 async def get_assessment_submissions_route(assessment_id: str, teacher: dict = Depends(require_staff)):
-    await load_owned_assessment(assessment_id, teacher)
+    assessment = await load_owned_assessment(assessment_id, teacher)
     db = get_database()
     mcq = await db.mcq_submissions.find({"assessment_id": assessment_id}).sort("submitted_at", -1).to_list(5000)
     coding = await db.coding_submissions.find({"assessment_id": assessment_id},
                                               {"code": 0, "issues": 0, "code_embedding": 0}).sort("submitted_at", -1).to_list(5000)
     manual = await db.manual_submissions.find({"assessment_id": assessment_id}).sort("submitted_at", -1).to_list(5000)
     users = await _users_by_id(s["student_id"] for s in mcq + coding + manual)
+    proctoring = await proctor.summaries_for(assessment, [s["student_id"] for s in mcq + coding + manual])
 
     def base(s, kind):
         u = users.get(s["student_id"], {})
+        p = proctoring.get(s["student_id"])
         return {"id": str(s["_id"]), "type": kind, "student_id": s["student_id"],
                 "student_name": u.get("name", "Unknown"), "student_email": u.get("email", ""),
                 "assessment_id": assessment_id, "submitted_at": s.get("submitted_at"),
-                "review_flags": s.get("review_flags", [])}
+                "review_flags": s.get("review_flags", []) + proctor.flag_for(p),
+                "proctoring": {k: v for k, v in p.items() if k != "events"} if p else None}
 
     rows: List[dict] = []
     for s in mcq:
@@ -196,7 +200,9 @@ async def get_assessment_stats_route(teacher: dict = Depends(require_staff)):
 async def get_mcq_submission_detail(submission_id: str, teacher: dict = Depends(require_staff)):
     sub, assessment = await load_owned_submission("mcq_submissions", submission_id, teacher)
     student = (await _users_by_id([sub["student_id"]])).get(sub["student_id"], {})
+    proctoring = (await proctor.summaries_for(assessment, [sub["student_id"]])).get(sub["student_id"])
     return {
+        "proctoring": proctoring,
         "id": str(sub["_id"]), "assessment_id": sub["assessment_id"], "assessment_title": assessment.get("title"),
         "student_id": sub["student_id"], "student_name": student.get("name", "Unknown"),
         "student_email": student.get("email", ""), "score": sub.get("score"), "total_marks": sub.get("total_marks"),

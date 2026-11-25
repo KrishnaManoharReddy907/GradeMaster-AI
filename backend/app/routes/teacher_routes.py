@@ -29,6 +29,10 @@ async def get_coding_submission(submission_id: str, teacher: dict = Depends(requ
     question = next((q for q in assessment.get("coding_questions", []) if q["question_id"] == sub["question_id"]), {})
     detail["question"] = {k: question.get(k) for k in ("title", "problem_statement", "marks", "topic")}
     detail["assessment_title"] = assessment.get("title")
+    from app.services import proctoring_service as proctor
+    detail["proctoring"] = (await proctor.summaries_for(assessment, [sub["student_id"]])).get(sub["student_id"])
+    if detail["proctoring"] and detail["proctoring"]["violations"]:
+        detail["review_flags"] = list(detail.get("review_flags") or []) + ["left_exam"]
     return detail
 
 

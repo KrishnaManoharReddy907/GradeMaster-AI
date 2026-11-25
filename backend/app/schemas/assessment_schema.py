@@ -143,6 +143,7 @@ class RulesSchema(BaseModel):
     allow_back_navigation: bool = True
     max_attempts: int = Field(default=1, ge=1, le=5)
     proctoring_enabled: bool = False
+    max_violations: int = Field(default=3, ge=1, le=10)  # proctored exams auto-submit at this many violations
     full_screen_required: bool = False
     copy_paste_disabled: bool = True
 

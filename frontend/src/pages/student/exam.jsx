@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Clock, Info, Play, Send } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Clock, Info, Maximize, Play, Send, ShieldAlert } from 'lucide-react'
 import { Logo } from '@/components/AppShell'
 import { Badge, Button, Callout, Card, CardBody, KeyValue } from '@/components/ui'
+import { api } from '@/lib/api'
 import { useNow } from '@/lib/hooks'
 import { cn, duration, fmtDateTime, TYPE_LABELS } from '@/lib/utils'
 
@@ -80,6 +82,12 @@ export function StartGate({ assessment, onStart, starting, kind }) {
             ['Closes', fmtDateTime(assessment.end_time)],
           ]} />
           {assessment.instructions && <Callout tone="info" icon={Info} title="Instructions"><p className="prose-answer">{assessment.instructions}</p></Callout>}
+          {isProctored(assessment) && (
+            <Callout tone="bad" icon={ShieldAlert} title="Proctored exam">
+              The exam opens in fullscreen. Leaving fullscreen, switching tabs or apps, or reloading the page counts as a violation.
+              After {assessment.rules.max_violations || 3} violations your answers are submitted automatically. Your teacher sees every violation.
+            </Callout>
+          )}
           {timed && (
             <Callout tone="warn" icon={AlertTriangle}>
               Your {assessment.duration_minutes}-minute clock starts when you press Start and keeps running if you close the page.
@@ -90,6 +98,134 @@ export function StartGate({ assessment, onStart, starting, kind }) {
         </CardBody>
       </Card>
     </div>
+  )
+}
+
+/* ─── Proctoring ─────────────────────────────────────────────────────────
+ * The browser can detect (not prevent) leaving fullscreen, switching tabs and clicking
+ * other apps. Each event is reported to the server, which keeps the count; at the limit the
+ * attempt is closed and the page submits what the student has. */
+
+export const fullscreenSupported = () =>
+  typeof document !== 'undefined' && Boolean(document.documentElement?.requestFullscreen) && document.fullscreenEnabled !== false
+
+export function enterFullscreen() {
+  try {
+    if (fullscreenSupported() && !document.fullscreenElement) return document.documentElement.requestFullscreen().catch(() => {})
+  } catch { /* not allowed */ }
+  return Promise.resolve()
+}
+
+export function exitFullscreen() {
+  try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}) } catch { /* ignore */ }
+}
+
+export const isProctored = (assessment) => Boolean(assessment?.rules?.proctoring_enabled)
+
+/**
+ * attempt.resumed = the attempt existed before this page load (reload, closed tab, re-login):
+ * that counts as a violation once, and the exam stays covered until fullscreen is back.
+ */
+export function useProctoring({ assessmentId, assessment, attempt, onTerminate }) {
+  const enabled = isProctored(assessment) && Boolean(attempt)
+  const [state, setState] = useState(attempt?.proctoring || null)
+  const [blocked, setBlocked] = useState(false)
+  const last = useRef(0)
+  const terminated = useRef(false)
+  const resumeReported = useRef(false)
+  const terminateRef = useRef(onTerminate)
+  useEffect(() => { terminateRef.current = onTerminate })
+  useEffect(() => { if (attempt?.proctoring) setState(attempt.proctoring) }, [attempt])
+
+  const finish = useCallback(() => {
+    if (terminated.current) return
+    terminated.current = true
+    setBlocked(false)
+    terminateRef.current?.()
+  }, [])
+
+  const report = useCallback(async (type) => {
+    const now = Date.now()
+    if (now - last.current < 1500 || terminated.current) return   // one action often fires several events
+    last.current = now
+    try {
+      const s = await api.student.proctorEvent(assessmentId, type)
+      setState(s)
+      if (s?.terminated) finish()
+    } catch { /* offline: the next event or the resume check will catch up */ }
+  }, [assessmentId, finish])
+
+  useEffect(() => {
+    if (!enabled) return undefined
+    if (state?.terminated) { finish(); return undefined }
+    if (attempt.resumed && !resumeReported.current) {
+      resumeReported.current = true
+      report('reentered')
+      setBlocked(true)
+    } else if (fullscreenSupported() && !document.fullscreenElement) {
+      setBlocked(true)
+    }
+    const onFs = () => { if (fullscreenSupported() && !document.fullscreenElement) { setBlocked(true); report('fullscreen_exit') } }
+    const onVis = () => { if (document.hidden) { setBlocked(true); report('tab_hidden') } }
+    let blurTimer
+    const onBlur = () => {
+      clearTimeout(blurTimer)
+      blurTimer = setTimeout(() => { if (!document.hasFocus() && !document.hidden) { setBlocked(true); report('window_blur') } }, 800)
+    }
+    document.addEventListener('fullscreenchange', onFs)
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      clearTimeout(blurTimer)
+      document.removeEventListener('fullscreenchange', onFs)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => exitFullscreen(), [])   // leaving the exam page always leaves fullscreen
+
+  const resume = useCallback(async () => {
+    await enterFullscreen()
+    if (!fullscreenSupported() || document.fullscreenElement) setBlocked(false)
+  }, [])
+
+  return { enabled, state, blocked: enabled && blocked && !terminated.current, resume }
+}
+
+/** Covers the exam (timer still visible in the header) until the student returns to fullscreen. */
+export function ProctorOverlay({ proctor, remaining }) {
+  // While covered, the exam underneath can't be focused, typed into or clicked.
+  useEffect(() => {
+    const root = document.getElementById('root')
+    if (!root) return undefined
+    if (proctor.blocked) root.setAttribute('inert', '')
+    else root.removeAttribute('inert')
+    return () => root.removeAttribute('inert')
+  }, [proctor.blocked])
+  if (!proctor.blocked) return null
+  const v = proctor.state?.violations ?? 0
+  const max = proctor.state?.max_violations ?? 3
+  const left = Math.max(0, max - v)
+  return createPortal(
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-canvas/97 p-4 backdrop-blur" role="alertdialog" aria-modal="true" aria-labelledby="proctor-title">
+      <div className="card w-full max-w-md space-y-4 p-6 text-center shadow-pop">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-warn-soft text-warn"><ShieldAlert className="h-6 w-6" /></span>
+        <div>
+          <h2 id="proctor-title" className="text-lg font-semibold">{v ? `Warning ${v} of ${max}` : 'Fullscreen required'}</h2>
+          <p className="mt-1 text-[14px] text-ink-2">
+            {v ? 'You left the exam window. ' : 'This exam runs in fullscreen. '}
+            {left > 0 ? <>After <b>{left}</b> more {left === 1 ? 'time' : 'times'} your exam is submitted automatically.</> : 'Your exam is being submitted.'}
+          </p>
+        </div>
+        {remaining !== null && <div className="flex justify-center"><Timer remaining={remaining} /></div>}
+        <p className="text-[12.5px] text-ink-3">The timer keeps running while this message is shown.</p>
+        <Button size="lg" className="w-full" icon={Maximize} onClick={proctor.resume}>
+          {fullscreenSupported() ? 'Return to fullscreen' : 'Continue exam'}
+        </Button>
+      </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -15,6 +15,7 @@ from app.schemas.assessment_schema import (
     StudentAssessmentResponse,
 )
 from app.services import assessment_service as svc
+from app.services import proctoring_service as proctor
 from app.services.audit_service import record_audit
 
 router = APIRouter()
@@ -144,7 +145,7 @@ async def get_student_assessment_detail_route(assessment_id: str, student: dict 
     return {**_student_header(a, await svc.subject_names([a["subject_id"]])),
             **svc.sanitize_for_student(a, student_id=str(student["_id"])),
             "attempt": {"started_at": attempt["started_at"], "deadline": attempt["deadline"],
-                        "server_time": svc.now_utc()} if attempt else None}
+                        "server_time": svc.now_utc(), "proctoring": proctor.attempt_summary(attempt, a)} if attempt else None}
 
 
 @router.post("/student/assessments/{assessment_id}/start")
@@ -153,7 +154,19 @@ async def start_assessment_route(assessment_id: str, student: dict = Depends(req
     a = await svc.require_assessment(assessment_id)
     attempt = await svc.start_attempt(student, a)
     return {"started_at": attempt["started_at"], "deadline": attempt["deadline"],
-            "server_time": svc.now_utc()}
+            "server_time": svc.now_utc(), "proctoring": proctor.attempt_summary(attempt, a)}
+
+
+class ProctorEvent(BaseModel):
+    type: str
+
+
+@router.post("/student/assessments/{assessment_id}/proctor-event")
+async def proctor_event_route(assessment_id: str, event: ProctorEvent, student: dict = Depends(require_student)):
+    """Record a fullscreen exit / tab switch. Returns the running count and whether the attempt is closed."""
+    a = await svc.require_assessment(assessment_id)
+    svc.check_student_eligible(student, a)
+    return await proctor.record_event(student, a, event.type)
 
 
 @router.get("/student/assessments/{assessment_id}/review-questions")

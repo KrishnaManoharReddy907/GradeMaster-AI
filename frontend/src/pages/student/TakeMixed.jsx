@@ -11,7 +11,7 @@ import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle, usePersistentState } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
 import { cn, optionLabel } from '@/lib/utils'
-import { ExamShell, StartGate, useDeadline, useLeaveGuard, useSubmittingRef } from './exam'
+import { enterFullscreen, ExamShell, isProctored, ProctorOverlay, StartGate, useDeadline, useLeaveGuard, useProctoring, useSubmittingRef } from './exam'
 
 const TEMPLATES = {
   python: '# Read input with input() and print the answer.\n\n',
@@ -46,7 +46,7 @@ export default function TakeMixed() {
   const allowed = assessment?.coding_config?.allowed_languages || ['python']
   const mcqDone = a.data?.mcqDone
   const codingDone = a.data?.codingDone || new Set()
-  useEffect(() => { if (a.data?.assessment.attempt) setAttempt(a.data.assessment.attempt) }, [a.data])
+  useEffect(() => { if (a.data?.assessment.attempt) setAttempt({ ...a.data.assessment.attempt, resumed: true }) }, [a.data])
   useEffect(() => { if (a.data && !mcq.length && coding.length) setView(coding[0].question_id) }, [a.data]) // eslint-disable-line react-hooks/exhaustive-deps
   useLeaveGuard(Boolean(attempt))
 
@@ -72,12 +72,14 @@ export default function TakeMixed() {
       }
       if (problems.length) { toast.error(problems.join(' · ')); end(); return }
       clearAnswers(); clearDrafts()
-      toast.success('Coding answers are evaluated automatically; your teacher finalises the grade.', auto ? 'Time’s up: submitted automatically' : 'Assessment submitted')
+      toast.success('Coding answers are evaluated automatically; your teacher finalises the grade.',
+        auto === 'proctor' ? 'Submitted after repeated proctoring violations' : auto ? 'Time’s up: submitted automatically' : 'Assessment submitted')
       navigate(`/student/results/${id}`, { replace: true })
     } catch (e) { toast.error(e); end() }
   }, [begin, end, mcq, coding, mcqDone, codingDone, answers, drafts, id, clearAnswers, clearDrafts, navigate, toast])
 
   useEffect(() => { if (attempt && remaining !== null && remaining <= 0) submitAll(true) }, [remaining, attempt, submitAll])
+  const proctor = useProctoring({ assessmentId: id, assessment, attempt, onTerminate: () => submitAll('proctor') })
 
   const nav = useMemo(() => [
     ...(mcq.length ? [{ key: 'mcq', label: `Part A · Multiple choice`, sub: `${mcqDone ? mcq.length : answered}/${mcq.length}`, done: mcqDone || answered === mcq.length, icon: ListChecks }] : []),
@@ -88,7 +90,7 @@ export default function TakeMixed() {
   if (a.loading) return <div className="p-8"><PageSkeleton /></div>
   if (a.error) return <div className="p-8"><ErrorState error={a.error} onRetry={a.reload} /></div>
   if (!attempt) return <StartGate assessment={assessment} kind="mixed" starting={starting} onStart={async () => {
-    setStarting(true); try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) } }} />
+    setStarting(true); if (isProctored(assessment)) enterFullscreen(); try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) } }} />
 
   const keyIdx = nav.findIndex((n) => n.key === view)
   const goNext = () => keyIdx < nav.length - 1 && setView(nav[keyIdx + 1].key)
@@ -97,6 +99,7 @@ export default function TakeMixed() {
   return (
     <ExamShell title={assessment.title} subtitle={`${mcq.length ? `MCQ ${mcqDone ? mcq.length : answered}/${mcq.length} · ` : ''}Coding ${written}/${coding.length}`}
       remaining={remaining} submitLabel="Submit assessment" onSubmit={() => setConfirm(true)} submitting={submitting} saved="Saved on this device">
+      <ProctorOverlay proctor={proctor} remaining={remaining} />
       <div className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">
         <nav className="mb-4 flex gap-2 overflow-x-auto pb-1" aria-label="Sections">
           {nav.map((n) => (

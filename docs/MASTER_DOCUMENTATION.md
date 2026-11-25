@@ -388,7 +388,7 @@ Validation failures return **422** with an additional `errors[]` array. Other co
 409 `conflict`, 413 `payload_too_large`, 429 `rate_limited` (with `Retry-After`), 503 `service_unavailable`.
 Interactive OpenAPI docs are served at `/api/docs` in development (disabled in production by default).
 
-The tables below are generated from the application's route table (76 endpoints). "Teacher" means an approved
+The tables below are generated from the application's route table (77 endpoints). "Teacher" means an approved
 faculty/teacher/HOD account or an admin. Resource-level ownership checks apply on top of the role check: a teacher can
 only open assessments they own, and students only their own submissions.
 
@@ -448,6 +448,7 @@ only open assessments they own, and students only their own submissions.
 | GET | `/api/student/assessments` | Student |  |
 | GET | `/api/student/assessments/{assessment_id}` | Student | Questions without answer keys. Not available before the start time. |
 | POST | `/api/student/assessments/{assessment_id}/start` | Student | Begin (or resume) a timed attempt; returns the student's personal deadline. |
+| POST | `/api/student/assessments/{assessment_id}/proctor-event` | Student | Record a fullscreen exit / tab switch. Returns the running count and whether the attempt is closed. |
 | GET | `/api/student/assessments/{assessment_id}/review-questions` | Student | Released question paper (with MCQ answers) after the deadline, if the teacher allows it. |
 
 #### Submissions
@@ -637,6 +638,16 @@ Malformed ids are treated as not found (404), so probing ids reveals nothing.
 4. **Review.** The teacher sees everything on one screen, sets the final score and a comment, and saves or finalises.
    *Finalise coding* in the workspace finalises every evaluated or reviewed submission at its current score.
 5. **Release.** Students see coding scores and feedback only after finalisation.
+
+### 22.0 Proctored exams (MCQ, coding, mixed)
+
+When the teacher enables *Proctored exam* (with an auto-submit limit, default 3 violations), *Start* enters
+fullscreen. Leaving fullscreen, hiding the tab, clicking another app, or reloading/closing and returning each count as
+one violation (events fired together within 1.5 s are merged) and are recorded on the attempt by
+`POST /api/student/assessments/{id}/proctor-event`. A covering screen (the exam underneath is inert) shows
+"Warning n of N" with the running timer until the student returns to fullscreen. At the limit the server marks the
+attempt terminated; the page submits the current answers, and the server accepts submissions for only 2 more minutes.
+Teachers see a *Left the exam window* flag and a timestamped event timeline on the submission.
 
 ### 22.1 Mixed (MCQ + coding) assessments
 
@@ -1067,9 +1078,10 @@ deterministic fake; Gemini by monkeypatched gateway functions where needed.
 | `test_coding_and_manual.py` | 13 | Auto-evaluation; partial marks; outage → failed; zero score survives finalise; lock; max-score validation; cross-teacher isolation; feedback visibility; symmetric plagiarism; AI outage flagged not zeroed; manual eligibility/duplicates; per-question review and finalise; review queue + analytics; student analytics and teacher profile access |
 | `test_question_bank.py` | 7 | Add/list/dedupe/delete; validation; import; AI drafts validated; rubric marks sum; subject assignment; 503 when unconfigured |
 | `test_hardening.py` | 4 | Client IP with/without trusted proxy; security headers; setup token |
-| `test_workflows.py` | 4 | Mixed assessment as one result with partial status and completeness; comma-separated keywords split (new and legacy data); teacher re-scoring after an AI outage (ownership, finalised lock); AI probe |
+| `test_proctoring.py` | 2 | Violation counting, termination at the limit, post-termination submission cut-off, teacher flag and timeline; rejected events (not proctored, not started, ineligible, unknown type) |
+| `test_workflows.py` | 5 | Mixed assessment as one result with partial status and completeness; comma-separated keywords split (new and legacy data); teacher re-scoring after an AI outage (ownership, finalised lock); AI probe |
 | `test_units.py` | 7 | Output normalisation; keyword matching; injection detection/fencing; JSON extraction; regex segmentation; plagiarism vs. renaming; shuffle properties |
-| **Total** | **63** | **63 passed** |
+| **Total** | **66** | **66 passed** |
 
 **Frontend** (Vitest + Testing Library, jsdom): 19 tests in 5 files covering the API client (auth header, error
 normalisation, network errors, 401 handling), route guards (sign-in redirect, role isolation, loading state), charts
@@ -1206,8 +1218,10 @@ Open `http://localhost:5173/setup` to create the first administrator. Optional e
 ## 45. Limitations
 
 * **Single instance**: rate limiting and the job worker are in-process; horizontal scaling needs the changes in §39.
-* **Stored but not enforced rules**: `max_attempts` greater than 1, proctoring, full-screen and copy-paste flags exist
-  in the data model (from the original schema) but are not enforced; one attempt per student is enforced by design.
+* **Stored but not enforced rules**: `max_attempts` greater than 1 and the copy-paste flag exist in the data model
+  (from the original schema) but are not enforced; one attempt per student is enforced by design.
+* **Proctoring limits**: a browser can detect but not block leaving fullscreen or switching apps, and cannot see a
+  second device; iPhone Safari has no fullscreen API, so only tab switching is detected there.
 * **OCR quality** depends on handwriting and scan quality; low-confidence pages are flagged, not corrected.
 * **AI judgement** can be wrong; every AI score is a suggestion that a teacher must finalise (coding/manual).
 * **Python-only precise AST**: other languages use heuristic structure analysis.
@@ -1299,6 +1313,6 @@ the repetitive work: running code, reading handwriting, checking rubrics, spotti
 class performance. Teachers keep the decisions. The system is explicit about uncertainty: outages, low confidence and
 suspicious input become flags and review priorities rather than silent errors. Security issues found in the audit have
 been fixed and are guarded by tests. The redesigned interface makes the workflows fast for teachers and calm for
-students. The application is tested (63 backend and 19 frontend automated tests, plus integration and visual checks)
+students. The application is tested (66 backend and 19 frontend automated tests, plus integration and visual checks)
 and packaged for deployment. The remaining step is to go live on the owner's hosting accounts and gather real-world
 feedback, starting with OCR accuracy and AI-teacher score agreement, to tune the evaluation further.

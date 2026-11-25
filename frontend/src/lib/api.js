@@ -160,6 +160,7 @@ export const api = {
     assessments: () => get('/api/student/assessments'),
     assessment: (id) => get(`/api/student/assessments/${id}`),
     start: (id) => post(`/api/student/assessments/${id}/start`),
+    proctorEvent: (id, type) => post(`/api/student/assessments/${id}/proctor-event`, { type }),
     paper: (id) => get(`/api/student/assessments/${id}/review-questions`),
     submitMcq: (assessment_id, answers) => post('/api/student/submit-mcq', { assessment_id, answers }),
     submitCode: (data) => post('/api/student/submit-coding', data),

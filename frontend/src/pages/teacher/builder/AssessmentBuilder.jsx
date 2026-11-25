@@ -30,7 +30,7 @@ function freshDraft() {
   return {
     title: '', description: '', assessment_type: 'mcq', subject_id: '', section_ids: [], duration_minutes: 30,
     start: toLocalInput(start), end: toLocalInput(end), instructions: '', release_questions_after_deadline: true,
-    rules: { show_result_immediately: false, allow_back_navigation: true, shuffle_questions: false, shuffle_options: false },
+    rules: { show_result_immediately: false, allow_back_navigation: true, shuffle_questions: false, shuffle_options: false, proctoring_enabled: false, max_violations: 3 },
     coding_config: { allowed_languages: ['python', 'java', 'cpp', 'c'], partial_marking: true, enable_auto_grading: true },
     mcq: [], coding: [], manual: [],
   }
@@ -237,6 +237,19 @@ export default function AssessmentBuilder() {
                 <Toggle checked={draft.rules.shuffle_options} onChange={(v) => set({ rules: { ...draft.rules, shuffle_options: v } })}
                   label="Shuffle answer options" description="Options appear in a different order for each student." />
               </>}
+              {(kinds.includes('mcq') || kinds.includes('coding')) && (
+                <div className="space-y-2">
+                  <Toggle checked={Boolean(draft.rules.proctoring_enabled)} onChange={(v) => set({ rules: { ...draft.rules, proctoring_enabled: v } })}
+                    label="Proctored exam" description="Fullscreen required; leaving it, switching tabs or reloading counts as a violation." />
+                  {draft.rules.proctoring_enabled && (
+                    <label className="ml-12 flex items-center gap-2 text-[13px] text-ink-2">Auto-submit after
+                      <select className="rounded-lg border border-line bg-surface px-2 py-1" value={draft.rules.max_violations || 3}
+                        onChange={(e) => set({ rules: { ...draft.rules, max_violations: Number(e.target.value) } })}>
+                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>violation(s)</label>
+                  )}
+                </div>
+              )}
               <Toggle checked={draft.release_questions_after_deadline} onChange={(v) => set({ release_questions_after_deadline: v })}
                 label="Release the question paper after closing" description="Students can revise from it (MCQ answers included)." />
               {kinds.includes('coding') && <>

@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, CircleSlash, XCircle } from 'lucide-react'
 import { Badge, Card, CardBody, ErrorState, PageHeader, PageSkeleton, ScorePill } from '@/components/ui'
+import ProctoringCard from '@/components/ProctoringCard'
 import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle } from '@/lib/hooks'
 import { cn, fmtDateTime, fmtPct, optionLabel } from '@/lib/utils'
@@ -19,6 +20,7 @@ export default function McqSubmission() {
       <PageHeader title={s.student_name} description={`${s.assessment_title} · submitted ${fmtDateTime(s.submitted_at)}`}
         back={<Link to={`/teacher/assessments/${s.assessment_id}`} className="mb-2 inline-flex items-center gap-1 text-[13px] text-ink-3 hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" />Back to assessment</Link>}
         actions={<div className="text-right"><ScorePill score={s.score} max={s.total_marks} className="text-xl" /><p className="text-[12.5px] text-ink-3">{fmtPct(s.percentage)} · auto-graded</p></div>} />
+      {s.proctoring && <div className="mb-4"><ProctoringCard proctoring={s.proctoring} /></div>}
       <div className="space-y-3">
         {s.mcq_questions.map((q, i) => {
           const r = results[q.question_id] || {}

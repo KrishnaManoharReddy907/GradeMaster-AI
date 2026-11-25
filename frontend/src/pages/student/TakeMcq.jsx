@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { useAsync, useDocumentTitle, usePersistentState } from '@/lib/hooks'
 import { useToast } from '@/lib/ui-state'
 import { cn, optionLabel } from '@/lib/utils'
-import { ExamShell, StartGate, useDeadline, useLeaveGuard, useSubmittingRef } from './exam'
+import { enterFullscreen, ExamShell, isProctored, ProctorOverlay, StartGate, useDeadline, useLeaveGuard, useProctoring, useSubmittingRef } from './exam'
 
 export default function TakeMcq() {
   const { id } = useParams()
@@ -28,10 +28,11 @@ export default function TakeMcq() {
   const backAllowed = a.data?.rules?.allow_back_navigation !== false
   const answered = Object.keys(answers).filter((k) => questions.some((q) => q.question_id === k)).length
 
-  useEffect(() => { if (a.data?.attempt) setAttempt({ ...a.data.attempt, server_time: null }) }, [a.data])
+  useEffect(() => { if (a.data?.attempt) setAttempt({ ...a.data.attempt, resumed: true }) }, [a.data])
 
   const start = async () => {
     setStarting(true)
+    if (isProctored(a.data)) enterFullscreen()   // must run inside the click
     try { setAttempt(await api.student.start(id)) } catch (e) { toast.error(e) } finally { setStarting(false) }
   }
 
@@ -43,7 +44,7 @@ export default function TakeMcq() {
       const res = await api.student.submitMcq(id, payload)
       clearAnswers(); clearFlags()
       toast.success(res.results_visible ? `You scored ${res.score} / ${res.total_marks}` : 'Your answers were submitted. Results appear after the assessment closes.',
-        auto ? 'Time’s up: submitted automatically' : 'Submitted')
+        auto === 'proctor' ? 'Submitted after repeated proctoring violations' : auto ? 'Time’s up: submitted automatically' : 'Submitted')
       navigate(`/student/results/${id}`, { replace: true })
     } catch (e) {
       if (e.status === 409) { clearAnswers(); navigate(`/student/results/${id}`, { replace: true }); return }
@@ -53,6 +54,7 @@ export default function TakeMcq() {
   }, [answers, questions, id, begin, end, clearAnswers, clearFlags, navigate, toast])
 
   useEffect(() => { if (attempt && remaining !== null && remaining <= 0) submit(true) }, [remaining, attempt, submit])
+  const proctor = useProctoring({ assessmentId: id, assessment: a.data, attempt, onTerminate: () => submit('proctor') })
 
   const q = questions[current]
   const status = useMemo(() => questions.map((qq) => (answers[qq.question_id] ? (flags[qq.question_id] ? 'review-answered' : 'answered') : flags[qq.question_id] ? 'review' : 'none')), [questions, answers, flags])
@@ -65,6 +67,7 @@ export default function TakeMcq() {
   return (
     <ExamShell title={a.data.title} subtitle={`${answered} of ${questions.length} answered`} remaining={remaining}
       onSubmit={() => setConfirm(true)} submitting={submitting} saved="Saved on this device">
+      <ProctorOverlay proctor={proctor} remaining={remaining} />
       <div className="mx-auto grid max-w-[1400px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1fr_280px]">
         <section aria-label={`Question ${current + 1}`} className="card p-5 sm:p-7">
           <div className="mb-4 flex items-center justify-between gap-3">
